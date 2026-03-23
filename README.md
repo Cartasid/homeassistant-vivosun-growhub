@@ -2,7 +2,7 @@
 
 # Home Assistant Vivosun GrowHub
 
-Unofficial Home Assistant integration for Vivosun GrowHub lighting, fan control, and climate telemetry.
+Unofficial Home Assistant integration for Vivosun GrowHub lighting, fans, humidifiers, heaters, cameras, and climate telemetry.
 
 ![Status](https://img.shields.io/badge/Status-Working-green)
 ![Home Assistant](https://img.shields.io/badge/Home%20Assistant-Custom%20Integration-blue)
@@ -20,14 +20,18 @@ Unofficial Home Assistant integration for Vivosun GrowHub lighting, fan control,
 
 ## Why This Integration?
 
-This integration connects a Vivosun GrowHub account to Home Assistant and exposes the device as native `light`, `fan`, `sensor`, and `binary_sensor` entities.
+This integration connects a Vivosun GrowHub account to Home Assistant and exposes supported devices as native `light`, `fan`, `humidifier`, `climate`, `camera`, `sensor`, and `binary_sensor` entities.
 
 What is working:
 
 - UI config flow with credential validation
+- Multi-device support within one config entry
 - Grow light control with correct minimum brightness handling
 - Circulation fan control with 10-step mapping and `natural_wind` preset
 - Duct fan control with 10-step mapping and auto-threshold service
+- AeroStream humidifier support
+- AeroFlux heater support
+- GrowCam camera support with optional LAN IP setup
 - Climate telemetry polling for inside/outside temperature, humidity, and VPD
 - Redacted diagnostics export
 
@@ -35,7 +39,7 @@ What this integration is not:
 
 - It is not an official Vivosun integration
 - It does not offer local/offline control
-- It currently targets one GrowHub device per config entry
+- It still depends on the Vivosun cloud, AWS IoT, and valid device credentials
 
 ## Compatibility
 
@@ -90,6 +94,7 @@ The config flow asks for:
 The options flow currently exposes:
 
 - `temp_unit`: `celsius` or `fahrenheit`
+- `camera_ip`: optional GrowCam LAN IP, if one is present on the account
 
 ## What It Exposes
 
@@ -110,6 +115,21 @@ Fan behavior is device-accurate rather than linear:
 - The underlying device uses non-linear shadow values
 - Plain `turn_on` defaults to the lowest safe level, not maximum speed
 - The circulation fan also exposes `natural_wind` as a preset mode
+
+### Humidifier
+
+- `humidifier.growhub_<device>_humidifier`
+- Exposes AeroStream humidifier state and mode
+
+### Climate
+
+- `climate.growhub_<device>_heater`
+- Exposes AeroFlux heater state, mode, and target control
+
+### Camera
+
+- `camera.growhub_<device>_camera`
+- Uses the optional `camera_ip` setting and LAN credentials from the account payload to build the RTSP stream URL
 
 ### Sensors
 
@@ -183,6 +203,7 @@ Check:
 - Home Assistant can reach the Vivosun API and AWS IoT websocket endpoint
 - the account has at least one GrowHub device
 - the device appears online in the Vivosun app
+- if you use GrowCam, the optional LAN IP is configured correctly
 
 ### Controls work oddly
 
