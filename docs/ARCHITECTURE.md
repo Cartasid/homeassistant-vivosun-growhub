@@ -22,14 +22,20 @@ This split exists because control and reported device state are available throug
 
 The coordinator owns this sequence in [coordinator.py](../custom_components/vivosun_growhub/coordinator.py).
 
-## Device selection
+## Device discovery and routing
 
-The integration currently selects one GrowHub device per config entry.
+The integration discovers all supported devices on the account during bootstrap.
 
-Selection is deterministic:
+Current device classes:
 
-- devices are sorted by `(device_id, client_id, topic_prefix)`
-- the first device is chosen
+- GrowHub controller
+- AeroStream humidifier
+- AeroFlux heater
+- GrowCam camera
+
+MQTT-capable devices are tracked inside one coordinator and routed by `device_id`, `client_id`, and `topic_prefix`.
+
+Cameras are discovered from the same account payload, but they do not participate in the MQTT/shadow path because they use LAN RTSP streaming instead.
 
 ## MQTT path
 
@@ -38,6 +44,8 @@ Selection is deterministic:
 - light state and control
 - circulation fan state and control
 - duct fan state and control
+- humidifier state and control
+- heater state and control
 - connection state
 
 ### Topics
@@ -68,6 +76,9 @@ Only reported, accepted, and documents payloads are merged into the visible stat
 
 - inside temperature, humidity, and VPD
 - outside temperature, humidity, and VPD
+- humidifier probe temperature, humidity, and VPD
+- heater probe temperature, humidity, and VPD
+- humidifier water level
 - optional core temperature and RSSI
 
 ### Endpoint
@@ -125,6 +136,24 @@ Home Assistant exposes a 10-step speed model. The device shadow uses non-linear 
 Special mode:
 
 - `natural_wind` is represented by `lv = 200`
+
+### Humidifier
+
+- represented as a native Home Assistant `humidifier`
+- supports manual and auto mode
+- exposes target humidity and current water level when available
+
+### Heater
+
+- represented as a native Home Assistant `climate` entity
+- supports manual and auto mode
+- exposes target temperature through the standard climate interface
+
+### Camera
+
+- represented as a Home Assistant `camera` entity
+- uses the optional `camera_ip` option plus LAN credentials exposed by the account payload
+- RTSP stream URL is derived at runtime and credentials are URL-encoded before use
 
 ## Failure handling
 
