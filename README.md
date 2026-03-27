@@ -33,6 +33,7 @@ What is working:
 - AeroFlux heater support
 - GrowCam camera support with optional LAN IP setup
 - Climate telemetry polling for inside/outside temperature, humidity, and VPD
+- Grow plan sensors: active stage name, light schedule with time remaining, fan schedules
 - Redacted diagnostics export
 
 What this integration is not:
@@ -46,6 +47,7 @@ What this integration is not:
 Verified working:
 
 - GrowHub `E42A`
+- GrowHub `E25`
 
 Supported Home Assistant version:
 

@@ -75,6 +75,15 @@ def _client_model_token(client_id: str) -> str:
 
 
 @dataclass(slots=True, frozen=True)
+class PlanStageInfo:
+    """Plan stage details fetched from iot/plan/stageInfo."""
+
+    stage_name: str
+    icon: str
+    content: dict[str, object]
+
+
+@dataclass(slots=True, frozen=True)
 class AwsIdentity:
     """AWS IoT identity payload parsed from awsIdentity endpoint."""
 
