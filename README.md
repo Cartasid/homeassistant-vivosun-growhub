@@ -211,6 +211,8 @@ Check:
 
 The fans are not percentage-native devices. Home Assistant percentages are mapped onto the GrowHub's discrete app levels. If you expect strict linear percentages, the device will appear inconsistent.
 
+If you enable a GrowHub recipe or plan in the Vivosun app, the device may ignore manual control requests from Home Assistant while that plan is active. The entities can still appear available, but the device may not respond to manual light or fan changes until plan mode is disabled in the Vivosun app.
+
 ### Climate sensors stay `unknown`
 
 Climate telemetry comes from REST polling, not from the MQTT shadow. After startup or reload, give the integration one poll cycle to populate the sensors.
