@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 class _ApiStub:
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.plan_stage_info_calls: list[str] = []
         self.tokens = AuthTokens(
             access_token="access",
             login_token="login",
@@ -86,6 +87,12 @@ class _ApiStub:
         _ = (start_time, end_time)
         self.calls.append("get_point_log")
         return dict(self.point_log)
+
+    async def get_plan_stage_info(self, _tokens: AuthTokens, stage_id: str) -> object:
+        self.plan_stage_info_calls.append(stage_id)
+        from custom_components.vivosun_growhub.models import PlanStageInfo
+
+        return PlanStageInfo(stage_name="Seedling", icon="", content={"light": {"slot": []}})
 
 
 class _AwsAuthStub:
@@ -293,6 +300,73 @@ async def test_coordinator_mqtt_callbacks_update_shadow_and_sensor_state(
     assert device_sensors["outTemp"] == 1900
     assert device_sensors["inHumi"] == 5500
 
+    await coordinator.async_shutdown()
+
+
+async def test_coordinator_mqtt_shadow_update_refreshes_plan_stage_info_immediately(
+    hass: HomeAssistant,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    api = _ApiStub()
+    aws_auth = _AwsAuthStub()
+    aws_auth.queue_credentials(_credentials(datetime.now(tz=UTC) + timedelta(hours=1)))
+    _patch_coordinator_deps(monkeypatch, api, aws_auth)
+
+    coordinator = VivosunCoordinator(hass, object(), email="user@example.com", password="secret")
+    await coordinator.async_start()
+
+    mqtt = _MqttStub.instances[0]
+    shadow_payload = {
+        "state": {
+            "reported": {
+                "plan": {
+                    "stage1": {"startT": 1700000000, "contId": "abc+seedling"},
+                    "stage2": {"startT": 0, "contId": "def+veg"},
+                },
+                "connected": 1,
+            }
+        }
+    }
+    await mqtt.emit(
+        TOPIC_SHADOW_GET_ACCEPTED.format(thing=coordinator.device.client_id),
+        json.dumps(shadow_payload).encode("utf-8"),
+    )
+
+    assert api.plan_stage_info_calls == ["abc", "def"]
+    await coordinator.async_shutdown()
+
+
+async def test_coordinator_mqtt_shadow_update_refreshes_active_stage_even_if_cached(
+    hass: HomeAssistant,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    api = _ApiStub()
+    aws_auth = _AwsAuthStub()
+    aws_auth.queue_credentials(_credentials(datetime.now(tz=UTC) + timedelta(hours=1)))
+    _patch_coordinator_deps(monkeypatch, api, aws_auth)
+
+    coordinator = VivosunCoordinator(hass, object(), email="user@example.com", password="secret")
+    await coordinator.async_start()
+
+    mqtt = _MqttStub.instances[0]
+    shadow_payload = {
+        "state": {
+            "reported": {
+                "plan": {
+                    "stage1": {"startT": 1700000000, "contId": "abc+seedling"},
+                },
+                "connected": 1,
+            }
+        }
+    }
+    from custom_components.vivosun_growhub.models import PlanStageInfo
+    coordinator._plan_stage_cache["abc"] = PlanStageInfo(stage_name="Old", icon="", content={})
+    await mqtt.emit(
+        TOPIC_SHADOW_GET_ACCEPTED.format(thing=coordinator.device.client_id),
+        json.dumps(shadow_payload).encode("utf-8"),
+    )
+
+    assert api.plan_stage_info_calls == ["abc"]
     await coordinator.async_shutdown()
 
 

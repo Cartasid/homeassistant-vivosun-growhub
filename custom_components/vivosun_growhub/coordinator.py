@@ -187,6 +187,7 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
             self._camera_devices.clear()
             self._shadow_states.clear()
             self._sensor_states.clear()
+            self._plan_stage_cache.clear()
             self._client_id_to_device_id.clear()
             self._topic_prefix_to_device_id.clear()
             self._last_shadow_refresh_request_at.clear()
@@ -353,7 +354,10 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
                     or "/update/documents" in topic
                 ):
                     document = self._parse_json_object(payload)
-                    self._merge_shadow_state(device_id, parse_shadow_document(document))
+                    parsed_shadow = parse_shadow_document(document)
+                    self._merge_shadow_state(device_id, parsed_shadow)
+                    if "plan" in parsed_shadow:
+                        await self._refresh_plan_stages(force_refresh_active=True)
                     updated = True
                 elif topic.endswith("/update/delta"):
                     self._parse_json_object(payload)
@@ -378,6 +382,7 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
             return
 
         if updated:
+            await self._refresh_plan_stages()
             self.async_set_updated_data(self._build_state_snapshot())
 
     def _route_topic_to_device(self, topic: str) -> str | None:
@@ -411,7 +416,7 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
         device_shadow = self._shadow_states.setdefault(device_id, {})
         _deep_merge_mapping(device_shadow, {"connection": {"connected": connected}})
 
-    async def _refresh_plan_stages(self) -> None:
+    async def _refresh_plan_stages(self, *, force_refresh_active: bool = False) -> None:
         """Fetch plan stage details for any stage IDs found in shadow plan data."""
         if self._tokens is None:
             return
@@ -420,14 +425,20 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
             plan = shadow.get("plan")
             if not isinstance(plan, dict):
                 continue
+            active_key = plan.get("active_stage")
             stages = plan.get("stages")
             if not isinstance(stages, dict):
                 continue
-            for stage_entry in stages.values():
+            for stage_key, stage_entry in stages.items():
                 if not isinstance(stage_entry, dict):
                     continue
                 stage_id = stage_entry.get("stage_id", "")
-                if not stage_id or stage_id in self._plan_stage_cache:
+                if not stage_id:
+                    continue
+                should_refresh = stage_id not in self._plan_stage_cache
+                if force_refresh_active and stage_key == active_key:
+                    should_refresh = True
+                if not should_refresh:
                     continue
                 info = await self._api.get_plan_stage_info(self._tokens, stage_id)
                 if info is not None:
