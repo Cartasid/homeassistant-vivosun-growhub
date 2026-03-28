@@ -24,6 +24,7 @@ from .const import (
     SHADOW_KEY_MODE,
     SHADOW_KEY_NW,
     SHADOW_KEY_OSC,
+    SHADOW_KEY_PLAN,
     SHADOW_ROOT_REPORTED,
     SHADOW_ROOT_STATE,
     TOPIC_CHANNEL_APP,
@@ -151,6 +152,20 @@ class ConnectionState(TypedDict):
     connected: bool
 
 
+class PlanStageEntry(TypedDict):
+    """A single stage entry from the shadow plan."""
+
+    stage_id: str
+    start_time: int
+
+
+class PlanState(TypedDict):
+    """Normalized plan state from shadow.reported.plan."""
+
+    active_stage: str | None
+    stages: dict[str, PlanStageEntry]
+
+
 class ShadowV1State(TypedDict, total=False):
     """HA-oriented shadow slice plus normalized metadata for diagnostics."""
 
@@ -160,6 +175,7 @@ class ShadowV1State(TypedDict, total=False):
     hmdf: HumidifierState
     heat: HeaterState
     connection: ConnectionState
+    plan: PlanState
     reported_supported: dict[str, object]
 
 
@@ -216,6 +232,10 @@ def parse_reported_fragment(reported_fragment: dict[str, object]) -> ShadowV1Sta
 
     if SHADOW_KEY_CONNECTED in reported_fragment:
         parsed["connection"] = ConnectionState(connected=_as_bool(reported_fragment.get(SHADOW_KEY_CONNECTED)))
+
+    plan_raw = _as_dict(reported_fragment.get(SHADOW_KEY_PLAN))
+    if plan_raw is not None:
+        parsed["plan"] = _parse_plan_state(plan_raw)
 
     return parsed
 
@@ -503,6 +523,27 @@ def _parse_heat_state(heat: dict[str, object]) -> HeaterState:
         state=_as_int(heat.get("state")),
         target_temp=_normalize_sentinel_int(_as_int(heat.get("targetTemp"))),
     )
+
+
+def _parse_plan_state(plan: dict[str, object]) -> PlanState:
+    stages: dict[str, PlanStageEntry] = {}
+    active_stage: str | None = None
+    latest_start_t = 0
+
+    for key in ("stage1", "stage2", "stage3", "stage4"):
+        stage_raw = _as_dict(plan.get(key))
+        if stage_raw is None:
+            continue
+        cont_id = stage_raw.get("contId", "")
+        start_t = _as_int(stage_raw.get("startT")) or 0
+        stage_id = str(cont_id).split("+")[0] if cont_id else ""
+        stages[key] = PlanStageEntry(stage_id=stage_id, start_time=start_t)
+        if start_t > latest_start_t:
+            latest_start_t = start_t
+            active_stage = key
+
+    return PlanState(active_stage=active_stage, stages=stages)
+
 
 
 def _parse_channel_sensor_object(payload: dict[str, object]) -> ChannelSensorState:

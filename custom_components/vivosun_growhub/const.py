@@ -42,6 +42,9 @@ SHADOW_KEY_OSC = "osc"
 SHADOW_KEY_NW = "nw"
 SHADOW_KEY_AUTO = "auto"
 SHADOW_KEY_TUNIT = "tUnit"
+SHADOW_KEY_PLAN = "plan"
+
+API_PLAN_STAGE_INFO_PATH = "/iot/plan/stageInfo"
 
 SENSOR_KEY_INSIDE_TEMP = "inTemp"
 SENSOR_KEY_INSIDE_HUMI = "inHumi"

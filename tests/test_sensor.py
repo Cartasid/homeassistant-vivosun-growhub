@@ -8,12 +8,18 @@ from homeassistant.components.sensor import SensorStateClass
 from homeassistant.const import PERCENTAGE, UnitOfTemperature
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.vivosun_growhub import sensor as sensor_module
 from custom_components.vivosun_growhub.const import DOMAIN
 from custom_components.vivosun_growhub.models import DeviceInfo, RuntimeData
-from custom_components.vivosun_growhub.sensor import VivosunChannelSensorEntity, async_setup_entry
+from custom_components.vivosun_growhub.sensor import (
+    VivosunChannelSensorEntity,
+    VivosunPlanStageSensor,
+    async_setup_entry,
+)
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
+    from pytest import MonkeyPatch
 
 _DEV_ID = "dev-1"
 
@@ -46,7 +52,7 @@ class _StubCoordinator:
         return None
 
 
-async def test_sensor_setup_creates_eight_entities(hass: HomeAssistant) -> None:
+async def test_sensor_setup_creates_seventeen_entities(hass: HomeAssistant) -> None:
     coordinator = _StubCoordinator()
     entry = MockConfigEntry(domain=DOMAIN, title="t", data={})
     runtime = RuntimeData(entry_id=entry.entry_id, coordinator=cast("object", coordinator))
@@ -59,7 +65,7 @@ async def test_sensor_setup_creates_eight_entities(hass: HomeAssistant) -> None:
 
     await async_setup_entry(hass, entry, _add)
 
-    assert len(added) == 8
+    assert len(added) == 17
     assert {entity.unique_id for entity in added} == {
         f"vivosun_growhub_{_DEV_ID}_inTemp",
         f"vivosun_growhub_{_DEV_ID}_inHumi",
@@ -69,6 +75,15 @@ async def test_sensor_setup_creates_eight_entities(hass: HomeAssistant) -> None:
         f"vivosun_growhub_{_DEV_ID}_outVpd",
         f"vivosun_growhub_{_DEV_ID}_coreTemp",
         f"vivosun_growhub_{_DEV_ID}_rssi",
+        f"vivosun_growhub_{_DEV_ID}_plan_stage",
+        f"vivosun_growhub_{_DEV_ID}_plan_light",
+        f"vivosun_growhub_{_DEV_ID}_plan_cfan",
+        f"vivosun_growhub_{_DEV_ID}_plan_dfan",
+        f"vivosun_growhub_{_DEV_ID}_plan_hmdf",
+        f"vivosun_growhub_{_DEV_ID}_plan_dhmdf",
+        f"vivosun_growhub_{_DEV_ID}_plan_drip",
+        f"vivosun_growhub_{_DEV_ID}_plan_heat",
+        f"vivosun_growhub_{_DEV_ID}_plan_aircd",
     }
 
 
@@ -153,7 +168,11 @@ async def test_sensor_normalized_sentinel_none_maps_to_unavailable(hass: HomeAss
 
     await async_setup_entry(hass, entry, _add)
 
-    assert all(entity.native_value is None for entity in added)
+    assert all(
+        entity.native_value is None
+        for entity in added
+        if not entity.unique_id.startswith("vivosun_growhub_dev-1_plan_")
+    )
 
 
 async def test_sensor_temperature_options_celsius_and_fahrenheit(hass: HomeAssistant) -> None:
@@ -188,6 +207,279 @@ async def test_sensor_temperature_options_celsius_and_fahrenheit(hass: HomeAssis
     in_temp_f = next(entity for entity in fahrenheit_entities if entity.unique_id.endswith("_inTemp"))
     assert in_temp_f.native_unit_of_measurement == UnitOfTemperature.FAHRENHEIT
     assert in_temp_f.native_value == 77.0
+
+
+async def test_plan_stage_sensor_returns_manual_when_inactive() -> None:
+    coordinator = _StubCoordinator()
+    coordinator.data = {
+        "shadows": {
+            _DEV_ID: {
+                "plan": {
+                    "active_stage": None,
+                    "stages": {
+                        "stage1": {"stage_id": "abc", "start_time": 0},
+                    },
+                }
+            }
+        }
+    }
+
+    sensor = VivosunPlanStageSensor(
+        cast("object", coordinator),
+        MockConfigEntry(domain=DOMAIN, title="t", data={}),
+        _DEV_ID,
+    )
+    assert sensor.native_value == "Manual"
+
+
+def test_compute_light_schedule_handles_wraparound_window(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(sensor_module, "_seconds_from_midnight", lambda: 21 * 3600)
+    content = {
+        "light": {
+            "spec": 0,
+            "slot": [
+                {"time": 20 * 3600, "level": 25},
+                {"time": 8 * 3600, "level": 0},
+            ],
+        }
+    }
+
+    info = sensor_module._compute_light_schedule(content)
+    assert info["state"] == "on"
+    assert info["remaining_hours"] == 11.0
+    assert info["remaining_label"] == "11.0h until off"
+
+
+def test_compute_light_schedule_handles_wraparound_off_period(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(sensor_module, "_seconds_from_midnight", lambda: 17 * 3600)
+    content = {
+        "light": {
+            "spec": 0,
+            "slot": [
+                {"time": 20 * 3600, "level": 25},
+                {"time": 8 * 3600, "level": 0},
+            ],
+        }
+    }
+
+    info = sensor_module._compute_light_schedule(content)
+    assert info["state"] == "off"
+    assert info["remaining_hours"] == 3.0
+    assert info["remaining_label"] == "3.0h until on"
+
+
+def test_compute_light_schedule_uses_local_time_semantics(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(sensor_module, "_seconds_from_midnight", lambda: 18 * 3600)
+    content = {
+        "light": {
+            "spec": 0,
+            "slot": [
+                {"time": 12 * 3600, "level": 25},
+                {"time": 18 * 3600, "level": 0},
+            ],
+        }
+    }
+
+    info = sensor_module._compute_light_schedule(content)
+    assert info["state"] == "off"
+    assert info["remaining_hours"] == 18.0
+    assert info["remaining_label"] == "18.0h until on"
+
+
+def test_compute_light_schedule_minute_based_slots(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(sensor_module, "_seconds_from_midnight", lambda: (19 * 3600) + (26 * 60))
+    content = {
+        "light": {
+            "spec": 0,
+            "slot": [
+                {"time": 0, "level": 29},
+                {"time": 20 * 60, "level": 0},
+            ],
+        }
+    }
+
+    info = sensor_module._compute_light_schedule(content)
+    assert info["state"] == "on"
+    assert info["remaining_hours"] == 0.6
+    assert info["remaining_label"] == "0.6h until off"
+
+
+def test_compute_light_schedule_second_based_slots(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(sensor_module, "_seconds_from_midnight", lambda: (19 * 3600) + (26 * 60))
+    content = {
+        "light": {
+            "spec": 0,
+            "slot": [
+                {"time": 0, "level": 29},
+                {"time": 20 * 3600, "level": 0},
+            ],
+        }
+    }
+
+    info = sensor_module._compute_light_schedule(content)
+    assert info["state"] == "on"
+    assert info["remaining_hours"] == 0.6
+    assert info["remaining_label"] == "0.6h until off"
+
+
+def test_compute_fan_schedule_selects_active_auto_slot(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(sensor_module, "_seconds_from_midnight", lambda: 7 * 3600)
+    content = {
+        "dfan": {
+            "slot": [
+                {"time": 0, "mode": 0, "level": 0},
+                {"time": 6 * 3600, "mode": 2, "lvMin": 30, "lvMax": 100, "tMax": 2667},
+                {"time": 12 * 3600, "mode": 0, "level": 0},
+            ]
+        }
+    }
+
+    info = sensor_module._compute_fan_schedule(content, "dfan")
+    assert info["mode"] == "auto"
+    assert info["standby_speed"] == 10
+    assert info["standby_status"] == "S1"
+    assert info["trigger_speed"] == 100
+    assert info["temperature_max"] == 26.67
+    assert info["slot_time"] == "06:00"
+    assert info["next_time"] == "12:00"
+    assert sensor_module._recipe_device_label("fan", info) == "Auto Standby S1"
+
+
+def test_compute_fan_schedule_wraps_manual_slot_before_first_change(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(sensor_module, "_seconds_from_midnight", lambda: 2 * 3600)
+    content = {
+        "dfan": {
+            "slot": [
+                {"time": 6 * 3600, "mode": 2, "lvMin": 30, "lvMax": 100},
+                {"time": 12 * 3600, "mode": 0, "level": 0},
+                {"time": 18 * 3600, "mode": 0, "level": 30},
+            ]
+        }
+    }
+
+    info = sensor_module._compute_fan_schedule(content, "dfan")
+    assert info["mode"] == "manual"
+    assert info["level"] == 10
+    assert info["slot_time"] == "18:00"
+    assert info["next_time"] == "06:00"
+
+
+def test_compute_recipe_device_schedule_auto_humidifier(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(sensor_module, "_seconds_from_midnight", lambda: 7 * 3600)
+    content = {
+        "hmdf": {
+            "slot": [
+                {"time": 0, "mode": 2, "lvOn": 100, "tHumi": 5500},
+            ]
+        }
+    }
+
+    info = sensor_module._compute_recipe_device_schedule(content, "hmdf")
+    assert info["state"] == "auto"
+    assert info["target_humidity"] == 55.0
+    assert sensor_module._recipe_device_label("humidifier", info) == "Auto Humidity-based"
+
+
+def test_compute_recipe_device_schedule_auto_humidifier_vpd(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(sensor_module, "_seconds_from_midnight", lambda: 7 * 3600)
+    content = {
+        "hmdf": {
+            "slot": [
+                {"time": 0, "mode": 2, "lvOn": 80, "tVpd": 100, "vpdSwit": 1},
+            ]
+        }
+    }
+
+    info = sensor_module._compute_recipe_device_schedule(content, "hmdf")
+    assert info["state"] == "auto"
+    assert info["control_basis"] == "vpd"
+    assert info["target_vpd"] == 1.0
+    assert sensor_module._recipe_device_label("humidifier", info) == "Auto VPD-based"
+
+
+def test_compute_recipe_device_schedule_single_slot_wraps_next_time(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(sensor_module, "_seconds_from_midnight", lambda: 7 * 3600)
+    content = {
+        "dhmdf": {
+            "slot": [
+                {"time": 0, "mode": 2, "state": 1, "tHumi": 6000},
+            ]
+        }
+    }
+
+    info = sensor_module._compute_recipe_device_schedule(content, "dhmdf")
+    assert info["state"] == "auto"
+    assert info["target_humidity"] == 60.0
+    assert info["slot_time"] == "00:00"
+    assert info["next_time"] == "00:00"
+
+
+def test_compute_recipe_device_schedule_cycle_drip(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(sensor_module, "_seconds_from_midnight", lambda: 90 * 60)
+    content = {
+        "drip": {
+            "slot": [
+                {"time": 0, "mode": 0, "level": 0},
+                {"time": 3600, "mode": 1, "level": 100, "onDur": 1200, "offDur": 2400},
+                {"time": 7200, "mode": 0, "level": 0},
+            ]
+        }
+    }
+
+    info = sensor_module._compute_recipe_device_schedule(content, "drip")
+    assert info["state"] == "cycle"
+    assert info["on_minutes"] == 20
+    assert info["off_minutes"] == 40
+    assert sensor_module._recipe_device_label("drip", info) == "20m on / 40m off"
+
+
+def test_compute_recipe_device_schedule_manual_drip_zero_is_off(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(sensor_module, "_seconds_from_midnight", lambda: 2 * 3600)
+    content = {
+        "drip": {
+            "slot": [
+                {"time": 0, "mode": 0, "level": 0},
+            ]
+        }
+    }
+
+    info = sensor_module._compute_recipe_device_schedule(content, "drip")
+    assert info["state"] == "manual"
+    assert sensor_module._recipe_device_label("drip", info) == "Off"
+
+
+def test_compute_recipe_device_schedule_air_conditioner(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(sensor_module, "_seconds_from_midnight", lambda: 12 * 3600)
+    content = {
+        "aircd": {
+            "slot": [
+                {"time": 0, "state": 1, "func": 1, "tTemp": 2700},
+                {"time": 64800, "state": 1, "func": 1, "tTemp": 2400},
+            ]
+        }
+    }
+
+    info = sensor_module._compute_recipe_device_schedule(content, "aircd")
+    assert info["state"] == "on"
+    assert info["function"] == 1
+    assert info["target_temperature"] == 27.0
+    assert info["next_time"] == "18:00"
+    assert sensor_module._recipe_device_label("air_conditioner", info) == "Cooling"
+
+
+def test_stringify_plan_attribute_replaces_none_with_not_set() -> None:
+    info = {
+        "temperature_min": None,
+        "temperature_max": 25.56,
+        "nested": {"vpd_min": None},
+    }
+
+    formatted = sensor_module._stringify_plan_attribute(info)
+    assert formatted == {
+        "temperature_min": "Not set",
+        "temperature_max": 25.56,
+        "nested": {"vpd_min": "Not set"},
+    }
 
 
 async def test_sensor_setup_creates_probe_sensors_for_humidifier(hass: HomeAssistant) -> None:

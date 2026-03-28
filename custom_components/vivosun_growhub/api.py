@@ -14,6 +14,7 @@ from .const import (
     API_BASE_URL,
     API_DEVICE_LIST_PATH,
     API_LOGIN_PATH,
+    API_PLAN_STAGE_INFO_PATH,
     API_POINT_LOG_PATH,
     API_REQUEST_TIMEOUT_SECONDS,
     SENSOR_KEY_CORE_TEMP,
@@ -31,7 +32,7 @@ from .const import (
     SENSOR_UNAVAILABLE_SENTINEL,
 )
 from .exceptions import VivosunAuthError, VivosunConnectionError, VivosunResponseError
-from .models import AuthTokens, AwsIdentity, DeviceInfo, infer_device_type
+from .models import AuthTokens, AwsIdentity, DeviceInfo, PlanStageInfo, infer_device_type
 from .redaction import redact_identifier, sanitize_mapping_for_debug
 
 if TYPE_CHECKING:
@@ -234,6 +235,33 @@ class VivosunApiClient:
         ):
             snapshot[key] = self._optional_sensor_int(latest, key)
         return snapshot
+
+    async def get_plan_stage_info(self, tokens: AuthTokens, stage_id: str) -> PlanStageInfo | None:
+        """Fetch plan stage details from iot/plan/stageInfo."""
+        try:
+            data = await self._request_json(
+                "POST",
+                API_PLAN_STAGE_INFO_PATH,
+                headers=self._auth_headers(tokens),
+                json_body={"userPlanStageId": stage_id},
+            )
+        except (VivosunResponseError, VivosunConnectionError):
+            _LOGGER.debug("Failed to fetch plan stage info for stage_id=%s", stage_id)
+            return None
+
+        stage_name = self._optional_str(data, "stageName") or "Unknown"
+        icon = self._optional_str(data, "icon") or ""
+        content_str = self._optional_str(data, "planStageContent")
+        content: dict[str, object] = {}
+        if content_str:
+            try:
+                import json as json_mod
+                parsed = json_mod.loads(content_str)
+                if isinstance(parsed, dict):
+                    content = parsed
+            except (ValueError, TypeError):
+                pass
+        return PlanStageInfo(stage_name=stage_name, icon=icon, content=content)
 
     async def _request_json(
         self,

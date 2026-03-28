@@ -155,6 +155,32 @@ def test_parse_reported_fragment_tolerates_missing_and_wrong_types() -> None:
     assert parsed["connection"]["connected"] is False
 
 
+def test_parse_plan_state_chooses_most_recent_started_stage() -> None:
+    fragment: dict[str, object] = {
+        "plan": {
+            "stage1": {"startT": 1700000000, "contId": "a+1"},
+            "stage2": {"startT": 1700100000, "contId": "b+1"},
+            "stage3": {"startT": 1700050000, "contId": "c+1"},
+            "stage4": {"startT": 1700000001, "contId": "d+1"},
+        }
+    }
+
+    parsed = parse_reported_fragment(fragment)
+    assert parsed["plan"]["active_stage"] == "stage2"
+
+
+def test_parse_plan_state_no_active_stage_when_all_zero() -> None:
+    fragment: dict[str, object] = {
+        "plan": {
+            "stage1": {"startT": 0, "contId": "a+1"},
+            "stage2": {"startT": 0, "contId": "b+1"},
+        }
+    }
+
+    parsed = parse_reported_fragment(fragment)
+    assert parsed["plan"]["active_stage"] is None
+
+
 def test_parse_channel_sensor_payload_handles_supported_keys_and_sentinel() -> None:
     payload = {
         "inTemp": 2500,

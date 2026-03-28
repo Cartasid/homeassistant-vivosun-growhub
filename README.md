@@ -33,6 +33,7 @@ What is working:
 - AeroFlux heater support
 - GrowCam camera support with optional LAN IP setup
 - Climate telemetry polling for inside/outside temperature, humidity, and VPD
+- Grow plan sensors: active stage name, light schedule with time remaining, fan schedules
 - Redacted diagnostics export
 
 What this integration is not:
@@ -46,6 +47,7 @@ What this integration is not:
 Verified working:
 
 - GrowHub `E42A`
+- GrowHub `E25`
 
 Supported Home Assistant version:
 
@@ -208,6 +210,8 @@ Check:
 ### Controls work oddly
 
 The fans are not percentage-native devices. Home Assistant percentages are mapped onto the GrowHub's discrete app levels. If you expect strict linear percentages, the device will appear inconsistent.
+
+If you enable a GrowHub recipe or plan in the Vivosun app, the device may ignore manual control requests from Home Assistant while that plan is active. The entities can still appear available, but the device may not respond to manual light or fan changes until plan mode is disabled in the Vivosun app.
 
 ### Climate sensors stay `unknown`
 
