@@ -57,17 +57,16 @@ async def async_setup_entry(
     if coordinator is None:
         return
 
-    controllers = [d for d in coordinator.devices if d.device_type == "controller"]
-    if not controllers:
-        return
-    device_id = controllers[0].device_id
+    for device in coordinator.devices:
+        if device.device_type == "controller":
 
-    async_add_entities(
-        [
-            VivosunCirculationFanEntity(coordinator, device_id),
-            VivosunDuctFanEntity(coordinator, device_id),
-        ]
-    )
+            device_id = device.device_id
+            async_add_entities(
+                [
+                    VivosunCirculationFanEntity(coordinator, device_id),
+                    VivosunDuctFanEntity(coordinator, device_id),
+                ]
+            )
 
     platform = async_get_current_platform()
     platform.async_register_entity_service(
