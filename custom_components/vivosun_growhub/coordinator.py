@@ -26,7 +26,7 @@ from .const import (
 )
 from .exceptions import VivosunAuthError, VivosunResponseError
 from .mqtt_client import MQTTClient, MQTTConnectionError
-from .redaction import redact_identifier
+from .redaction import redact_identifier, sanitize_mapping_for_debug
 from .shadow import (
     ChannelSensorState,
     ShadowParseError,
@@ -272,6 +272,13 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
         selected.sort(key=lambda item: (item.device_id, item.client_id, item.topic_prefix))
         for d in selected:
             self._logger.info("Discovered device: %s (type=%s)", d.name, d.device_type)
+            self._logger.debug(
+                "Device discovery details for %s: client_id=%s, scene_id=%s, online=%s",
+                d.name,
+                redact_identifier(d.client_id),
+                d.scene_id,
+                d.online,
+            )
         return selected
 
     def _build_topic_maps(self) -> None:
@@ -354,6 +361,7 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
                     or "/update/documents" in topic
                 ):
                     document = self._parse_json_object(payload)
+                    self._log_shadow_reported_keys(device_id, topic, document)
                     parsed_shadow = parse_shadow_document(document)
                     self._merge_shadow_state(device_id, parsed_shadow)
                     if "plan" in parsed_shadow:
@@ -363,6 +371,7 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
                     self._parse_json_object(payload)
             # Channel topics: {topic_prefix}/channel/app
             elif "/channel/app" in topic:
+                self._log_channel_payload(device_id, payload)
                 self._merge_sensor_state(device_id, parse_channel_sensor_payload(payload))
                 self._set_shadow_connection_state(device_id, True)
                 updated = True
@@ -404,6 +413,53 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
         if not isinstance(decoded, dict):
             raise ValueError("MQTT payload root must be an object")
         return cast("dict[str, object]", decoded)
+
+    def _log_shadow_reported_keys(
+        self, device_id: str, topic: str, document: dict[str, object]
+    ) -> None:
+        """Debug-log shadow reported keys plus full sanitized contents for diagnostics."""
+        if not self._logger.isEnabledFor(logging.DEBUG):
+            return
+        state = document.get("state")
+        reported = state.get("reported") if isinstance(state, dict) else None
+        if not isinstance(reported, dict):
+            current = document.get("current")
+            current_state = current.get("state") if isinstance(current, dict) else None
+            reported = (
+                current_state.get("reported") if isinstance(current_state, dict) else None
+            )
+        if not isinstance(reported, dict):
+            return
+        topic_suffix = topic.rsplit("/", 1)[-1] if topic else "?"
+        redacted_device = redact_identifier(device_id)
+        self._logger.debug(
+            "Shadow reported keys for device %s on %s: %s",
+            redacted_device,
+            topic_suffix,
+            sorted(reported.keys()),
+        )
+        self._logger.debug(
+            "Shadow reported contents for device %s on %s: %s",
+            redacted_device,
+            topic_suffix,
+            sanitize_mapping_for_debug(reported),
+        )
+
+    def _log_channel_payload(self, device_id: str, payload: bytes) -> None:
+        """Debug-log the raw channel/app payload contents to surface unknown telemetry keys."""
+        if not self._logger.isEnabledFor(logging.DEBUG):
+            return
+        try:
+            raw = json.loads(payload)
+        except (ValueError, TypeError):
+            return
+        if not isinstance(raw, dict):
+            return
+        self._logger.debug(
+            "Channel/app payload for device %s: %s",
+            redact_identifier(device_id),
+            sanitize_mapping_for_debug(raw),
+        )
 
     def _merge_shadow_state(self, device_id: str, state: ShadowV1State) -> None:
         device_shadow = self._shadow_states.setdefault(device_id, {})
