@@ -47,8 +47,10 @@ What this integration is not:
 Verified working:
 
 - GrowHub `E42A`
+- GrowHub `E42A+`
 - GrowHub `E42`
 - GrowHub `E25`
+- GrowCam (LAN RTSP via the optional `camera_ip` option)
 
 Supported Home Assistant version:
 
@@ -56,12 +58,10 @@ Supported Home Assistant version:
 
 Notes:
 
-- The integration has been tested against current Home Assistant releases, not older 2024-era builds
-- Older Home Assistant versions may partially work, but they are not a supported target for this repository
-
-Likely compatible but not yet confirmed:
-
-- GrowHub `E42A+`
+- The E42A+ controller publishes its built-in box and external probe telemetry under `bTemp/bHumi/bVpd` and `pTemp/pHumi/pVpd` instead of the older `inTemp/outTemp` keys; the integration accepts both shapes.
+- GrowCam devices are detected even when the cloud payload omits `clientId`/`topicPrefix` or the user renamed the camera to a short name like `Cam`. After detection, set the camera's LAN IP via the integration's options to enable the RTSP stream.
+- The integration has been tested against current Home Assistant releases, not older 2024-era builds.
+- Older Home Assistant versions may partially work, but they are not a supported target for this repository.
 
 ## Quick Start
 
