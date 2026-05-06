@@ -120,6 +120,9 @@ class VivosunApiClient:
         device_type = infer_device_type(name, client_id or "")
         camera_username, camera_password = self._extract_camera_credentials(device)
 
+        if device_type == "unknown" and (camera_username is not None or camera_password is not None):
+            device_type = "camera"
+
         if device_type != "camera" and (client_id is None or topic_prefix is None):
             self._log_skipped_device(device, category_key=category_key, index=index)
             return None
