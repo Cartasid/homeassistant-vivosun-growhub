@@ -588,6 +588,34 @@ async def test_support_capture_defers_topic_subscription_if_mqtt_drops(
     await coordinator.async_shutdown()
 
 
+async def test_connect_mqtt_defers_active_support_capture_topics_if_subscription_fails(
+    hass: HomeAssistant,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    api = _ApiStub()
+    aws_auth = _AwsAuthStub()
+    aws_auth.queue_credentials(_credentials(datetime.now(tz=UTC) + timedelta(hours=1)))
+    _patch_coordinator_deps(monkeypatch, api, aws_auth)
+
+    coordinator = VivosunCoordinator(hass, object(), email="user@example.com", password="secret")
+    await coordinator.async_start()
+    await coordinator.async_start_support_capture(max_events=100)
+
+    async def _fail_subscribe() -> None:
+        raise MQTTConnectionError("MQTT client disconnected")
+
+    coordinator._async_subscribe_support_capture_topics = _fail_subscribe  # type: ignore[method-assign]
+
+    await coordinator._connect_mqtt()
+
+    snapshot = coordinator.support_capture_snapshot()
+    events = cast("list[dict[str, object]]", snapshot["events"])
+    assert snapshot["active"] is True
+    assert any(event["kind"] == "support_topics_subscription_deferred" for event in events)
+
+    await coordinator.async_shutdown()
+
+
 async def test_coordinator_ignores_malformed_and_non_object_shadow_payloads(
     hass: HomeAssistant,
     monkeypatch: MonkeyPatch,

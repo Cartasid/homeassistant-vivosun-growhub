@@ -344,7 +344,14 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
             self._logger.debug("Subscribed to MQTT topics for %s", device.name)
 
         if self._support_capture.active:
-            await self._async_subscribe_support_capture_topics()
+            try:
+                await self._async_subscribe_support_capture_topics()
+            except MQTTConnectionError:
+                self._logger.debug(
+                    "Support capture topic subscription deferred until MQTT reconnect",
+                    exc_info=True,
+                )
+                self._record_support_capture_subscription_deferred()
 
         self._logger.info("Connected MQTT session for %d devices", len(self._devices))
 
@@ -459,10 +466,7 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
                     "Support capture topic subscription deferred until MQTT reconnect",
                     exc_info=True,
                 )
-                self._support_capture.record(
-                    "support_topics_subscription_deferred",
-                    data={"reason": "mqtt_disconnected"},
-                )
+                self._record_support_capture_subscription_deferred()
 
     async def async_stop_support_capture(self) -> None:
         """Stop support capture."""
@@ -470,7 +474,7 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
         self._support_capture.stop()
 
     def _support_capture_topic_names(self) -> list[str]:
-        """Return additional topic subscriptions used only during support capture."""
+        """Return low-risk extra subscriptions used only during support capture."""
         topics: list[str] = []
         for device in self._devices:
             if device.client_id:
@@ -478,17 +482,16 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
                     [
                         f"$aws/things/{device.client_id}/shadow/get/rejected",
                         f"$aws/things/{device.client_id}/shadow/update/rejected",
-                        f"$aws/things/{device.client_id}/shadow/name/+/get/accepted",
-                        f"$aws/things/{device.client_id}/shadow/name/+/get/rejected",
-                        f"$aws/things/{device.client_id}/shadow/name/+/update/accepted",
-                        f"$aws/things/{device.client_id}/shadow/name/+/update/rejected",
-                        f"$aws/things/{device.client_id}/shadow/name/+/update/documents",
-                        f"$aws/things/{device.client_id}/shadow/name/+/update/delta",
                     ]
                 )
-            if device.topic_prefix:
-                topics.append(f"{device.topic_prefix}/#")
         return sorted(set(topics))
+
+    def _record_support_capture_subscription_deferred(self) -> None:
+        """Record that extra support subscriptions will be retried after reconnect."""
+        self._support_capture.record(
+            "support_topics_subscription_deferred",
+            data={"reason": "mqtt_disconnected"},
+        )
 
     async def _async_subscribe_support_capture_topics(self) -> None:
         """Subscribe extra diagnostics topics used only while support capture is active."""
