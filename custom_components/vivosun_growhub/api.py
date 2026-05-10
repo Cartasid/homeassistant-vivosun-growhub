@@ -17,6 +17,9 @@ from .const import (
     API_PLAN_STAGE_INFO_PATH,
     API_POINT_LOG_PATH,
     API_REQUEST_TIMEOUT_SECONDS,
+    SENSOR_KEY_BOX_HUMI,
+    SENSOR_KEY_BOX_TEMP,
+    SENSOR_KEY_BOX_VPD,
     SENSOR_KEY_CORE_TEMP,
     SENSOR_KEY_INSIDE_HUMI,
     SENSOR_KEY_INSIDE_TEMP,
@@ -116,6 +119,9 @@ class VivosunApiClient:
         topic_prefix = self._optional_str(device, "topicPrefix")
         device_type = infer_device_type(name, client_id or "")
         camera_username, camera_password = self._extract_camera_credentials(device)
+
+        if device_type == "unknown" and (camera_username is not None or camera_password is not None):
+            device_type = "camera"
 
         if device_type != "camera" and (client_id is None or topic_prefix is None):
             self._log_skipped_device(device, category_key=category_key, index=index)
@@ -226,6 +232,9 @@ class VivosunApiClient:
             SENSOR_KEY_OUTSIDE_TEMP,
             SENSOR_KEY_OUTSIDE_HUMI,
             SENSOR_KEY_OUTSIDE_VPD,
+            SENSOR_KEY_BOX_TEMP,
+            SENSOR_KEY_BOX_HUMI,
+            SENSOR_KEY_BOX_VPD,
             SENSOR_KEY_PROBE_TEMP,
             SENSOR_KEY_PROBE_HUMI,
             SENSOR_KEY_PROBE_VPD,
