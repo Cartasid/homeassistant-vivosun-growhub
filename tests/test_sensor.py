@@ -140,6 +140,42 @@ async def test_sensor_values_scale_and_map_correctly(hass: HomeAssistant) -> Non
     assert entity_by_unique_id[f"vivosun_growhub_{_DEV_ID}_rssi"].native_value == -35.0
 
 
+async def test_sensor_aliases_map_e42a_plus_channel_keys(hass: HomeAssistant) -> None:
+    coordinator = _StubCoordinator()
+    coordinator.data = {
+        "sensors": {
+            _DEV_ID: {
+                "bTemp": 2345,
+                "bHumi": 6012,
+                "bVpd": 145,
+                "pTemp": 1876,
+                "pHumi": 5234,
+                "pVpd": 98,
+            },
+        },
+        "shadows": {_DEV_ID: {"connection": {"connected": True}}},
+    }
+
+    entry = MockConfigEntry(domain=DOMAIN, title="t", data={})
+    runtime = RuntimeData(entry_id=entry.entry_id, coordinator=cast("object", coordinator))
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = runtime
+
+    added: list[VivosunChannelSensorEntity] = []
+
+    def _add(entities: list[VivosunChannelSensorEntity]) -> None:
+        added.extend(entities)
+
+    await async_setup_entry(hass, entry, _add)
+    entity_by_unique_id = {entity.unique_id: entity for entity in added}
+
+    assert entity_by_unique_id[f"vivosun_growhub_{_DEV_ID}_inTemp"].native_value == 23.45
+    assert entity_by_unique_id[f"vivosun_growhub_{_DEV_ID}_inHumi"].native_value == 60.12
+    assert entity_by_unique_id[f"vivosun_growhub_{_DEV_ID}_inVpd"].native_value == 1.45
+    assert entity_by_unique_id[f"vivosun_growhub_{_DEV_ID}_outTemp"].native_value == 18.76
+    assert entity_by_unique_id[f"vivosun_growhub_{_DEV_ID}_outHumi"].native_value == 52.34
+    assert entity_by_unique_id[f"vivosun_growhub_{_DEV_ID}_outVpd"].native_value == 0.98
+
+
 async def test_sensor_normalized_sentinel_none_maps_to_unavailable(hass: HomeAssistant) -> None:
     coordinator = _StubCoordinator()
     coordinator.data = {

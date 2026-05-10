@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from homeassistant.components.diagnostics import async_redact_data
@@ -12,6 +11,7 @@ from .redaction import redact_identifier, sanitize_mapping_for_debug
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from datetime import datetime
 
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
@@ -85,7 +85,7 @@ async def async_get_config_entry_diagnostics(
     if not isinstance(mqtt_connected, bool):
         mqtt_connected = coordinator.is_mqtt_connected
 
-    last_update = getattr(coordinator, "last_update_success_time", None)
+    last_update = coordinator.last_update_success_time
     last_update_iso = _as_iso(last_update)
 
     diagnostics_payload: dict[str, Any] = {
@@ -104,7 +104,6 @@ async def async_get_config_entry_diagnostics(
             "mqtt_connected": mqtt_connected,
             "shadow_keys": shadow_keys,
             "sensor_keys": sensor_keys,
-            "last_update_success": getattr(coordinator, "last_update_success", None),
             "last_update_success_time": last_update_iso,
         },
     }
@@ -112,10 +111,10 @@ async def async_get_config_entry_diagnostics(
     return sanitize_mapping_for_debug(redacted_diagnostics)
 
 
-def _as_iso(value: object) -> str | None:
-    if isinstance(value, datetime):
-        return value.isoformat()
-    return None
+def _as_iso(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat()
 
 
 def _redact_entry_identifier(value: str | None) -> str | None:

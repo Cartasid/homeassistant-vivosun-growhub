@@ -221,19 +221,9 @@ class VivosunApiClient:
         )
         entries = self._expect_sequence(data, "iotDataLogList")
         if not entries:
-            _LOGGER.debug(
-                "Point-log returned no entries for device %s",
-                redact_identifier(device.device_id),
-            )
             return {}
 
         latest = self._expect_mapping_item(entries[-1], "iotDataLogList[-1]")
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug(
-                "Point-log latest entry for device %s: %s",
-                redact_identifier(device.device_id),
-                sanitize_mapping_for_debug(dict(latest)),
-            )
         snapshot: dict[str, int | None] = {}
         for key in (
             SENSOR_KEY_INSIDE_TEMP,

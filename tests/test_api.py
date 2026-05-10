@@ -283,6 +283,38 @@ async def test_get_devices_extracts_camera_lan_credentials() -> None:
     assert devices[0].camera_password == "4kt5em"
 
 
+async def test_get_devices_detects_camera_even_when_renamed() -> None:
+    payload = {
+        "code": 0,
+        "success": True,
+        "message": "success",
+        "data": {
+            "deviceGroup": {
+                "GROW": [
+                    {
+                        "deviceId": "camera-1",
+                        "clientId": "",
+                        "topicPrefix": "",
+                        "name": "Cam",
+                        "onlineStatus": 1,
+                        "scene": {"sceneId": 1001},
+                        "setting": {"jf": {"devUser": "abjd", "devPass": "4kt5em"}},
+                    },
+                ]
+            }
+        },
+    }
+    session = cast("aiohttp.ClientSession", _MockSession(responses=[_MockResponse(status=200, payload=payload)]))
+    client = VivosunApiClient(session)
+
+    devices = await client.get_devices(_valid_tokens())
+
+    assert len(devices) == 1
+    assert devices[0].device_type == "camera"
+    assert devices[0].camera_username == "abjd"
+    assert devices[0].camera_password == "4kt5em"
+
+
 async def test_get_point_log_returns_latest_sensor_snapshot() -> None:
     payload = {
         "code": 0,
@@ -343,6 +375,50 @@ async def test_get_point_log_returns_latest_sensor_snapshot() -> None:
     }
 
 
+async def test_get_point_log_returns_e42a_plus_sensor_keys() -> None:
+    payload = {
+        "code": 0,
+        "success": True,
+        "message": "success",
+        "data": {
+            "iotDataLogList": [
+                {
+                    "bTemp": 2100,
+                    "bHumi": 6100,
+                    "bVpd": 123,
+                    "pTemp": 1900,
+                    "pHumi": 5500,
+                    "pVpd": 105,
+                    "time": 200,
+                },
+            ]
+        },
+    }
+    session = cast("aiohttp.ClientSession", _MockSession(responses=[_MockResponse(status=200, payload=payload)]))
+    client = VivosunApiClient(session)
+
+    from custom_components.vivosun_growhub.models import DeviceInfo
+
+    snapshot = await client.get_point_log(
+        _valid_tokens(),
+        DeviceInfo(
+            device_id="device-1",
+            client_id="vivosun-device-1",
+            topic_prefix="topic/1",
+            name="GrowHub A",
+            online=True,
+            scene_id=66078,
+        ),
+        start_time=100,
+        end_time=200,
+    )
+
+    assert snapshot["bTemp"] == 2100
+    assert snapshot["bHumi"] == 6100
+    assert snapshot["bVpd"] == 123
+    assert snapshot["pTemp"] == 1900
+    assert snapshot["pHumi"] == 5500
+    assert snapshot["pVpd"] == 105
 async def test_get_point_log_empty_list_returns_empty_snapshot() -> None:
     payload = {
         "code": 0,
