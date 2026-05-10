@@ -63,6 +63,10 @@ async def async_get_config_entry_diagnostics(
         device = coordinator.device
     except RuntimeError:
         device = None
+    discovered_devices = _build_discovered_device_inventory(
+        coordinator,
+        primary_device_id=device.device_id if device else None,
+    )
     snapshot = coordinator.data if isinstance(coordinator.data, dict) else {}
     shadow = None
     sensors = snapshot.get("sensors")
@@ -102,6 +106,7 @@ async def async_get_config_entry_diagnostics(
             "client_id": device.client_id,
             "topic_prefix": device.topic_prefix,
         },
+        "discovered_devices": discovered_devices,
         "support_capture": coordinator.support_capture_snapshot(),
         "coordinator": {
             "mqtt_connected": mqtt_connected,
@@ -140,3 +145,39 @@ def _json_safe_value(value: object) -> object:
     if isinstance(value, list):
         return [_json_safe_value(item) for item in value]
     return f"<{type(value).__name__}>"
+
+
+def _build_discovered_device_inventory(
+    coordinator: object,
+    *,
+    primary_device_id: str | None,
+) -> list[dict[str, object]]:
+    inventory: list[dict[str, object]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    for collection_name in ("devices", "camera_devices"):
+        devices = getattr(coordinator, collection_name, ())
+        if not isinstance(devices, list):
+            continue
+        for candidate in devices:
+            device_id = getattr(candidate, "device_id", "")
+            client_id = getattr(candidate, "client_id", "")
+            topic_prefix = getattr(candidate, "topic_prefix", "")
+            key = (device_id, client_id, topic_prefix)
+            if key in seen:
+                continue
+            seen.add(key)
+            inventory.append(
+                {
+                    "name": getattr(candidate, "name", ""),
+                    "online": getattr(candidate, "online", False),
+                    "device_type": getattr(candidate, "device_type", "unknown"),
+                    "scene_id": getattr(candidate, "scene_id", 0),
+                    "device_id": device_id,
+                    "client_id": client_id,
+                    "topic_prefix": topic_prefix,
+                    "is_primary": bool(primary_device_id and device_id == primary_device_id),
+                }
+            )
+
+    return inventory

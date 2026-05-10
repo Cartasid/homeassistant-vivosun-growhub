@@ -35,10 +35,25 @@ class _CoordinatorStub:
             },
             "sensors": {self.device.device_id: {"inTemp": 2500, "inHumi": 5123}},
         }
+        self.camera_devices = [
+            DeviceInfo(
+                device_id="camera-654321",
+                client_id="",
+                topic_prefix="",
+                name="GrowCam C4",
+                online=True,
+                scene_id=66079,
+                device_type="camera",
+            )
+        ]
         self.is_mqtt_connected = True
         self.last_update_success = True
         self.last_update_success_time = datetime(2026, 3, 5, 12, 0, tzinfo=UTC)
         self.support_capture_active = True
+
+    @property
+    def devices(self) -> list[DeviceInfo]:
+        return [self.device]
 
     def support_capture_snapshot(self) -> dict[str, object]:
         return {
@@ -93,6 +108,14 @@ async def test_diagnostics_redacts_sensitive_values(
     assert device["device_id"] != "device-123456"
     assert device["client_id"] != "vivosun-VSCTLE42A-account-device-123456"
     assert device["topic_prefix"] != "vivosun/user/123456/device/123456"
+
+    discovered_devices = cast("list[dict[str, object]]", result["discovered_devices"])
+    assert len(discovered_devices) == 2
+    assert discovered_devices[0]["device_type"] == "controller"
+    assert discovered_devices[0]["is_primary"] is True
+    assert discovered_devices[0]["device_id"] != "device-123456"
+    assert discovered_devices[1]["device_type"] == "camera"
+    assert discovered_devices[1]["is_primary"] is False
 
     support_capture = cast("dict[str, object]", result["support_capture"])
     assert support_capture["active"] is True
