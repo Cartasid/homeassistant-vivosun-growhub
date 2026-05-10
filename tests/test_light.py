@@ -17,34 +17,40 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 _DEV_ID = "dev-1"
+_DEV_ID_2 = "dev-2"
+
+
+def _controller_device(device_id: str) -> DeviceInfo:
+    return DeviceInfo(
+        device_id=device_id,
+        client_id=f"vivosun-VSCTLE42A-acc-{device_id}",
+        topic_prefix=f"prefix/{device_id}",
+        name=f"GrowHub {device_id}",
+        online=True,
+        scene_id=66078,
+        device_type="controller",
+    )
 
 
 class _StubCoordinator:
-    def __init__(self) -> None:
+    def __init__(self, devices: list[DeviceInfo] | None = None) -> None:
         self.data: dict[str, object] = {}
-        self._device = DeviceInfo(
-            device_id=_DEV_ID,
-            client_id="vivosun-VSCTLE42A-acc-dev-1",
-            topic_prefix="prefix",
-            name="GrowHub",
-            online=True,
-            scene_id=66078,
-            device_type="controller",
-        )
+        self._devices = devices or [_controller_device(_DEV_ID)]
         self.is_mqtt_connected = True
         self.async_publish_shadow_update = AsyncMock()
 
     @property
     def device(self) -> DeviceInfo:
-        return self._device
+        return self._devices[0]
 
     @property
     def devices(self) -> list[DeviceInfo]:
-        return [self._device]
+        return self._devices
 
     def get_device(self, device_id: str) -> DeviceInfo | None:
-        if device_id == self._device.device_id:
-            return self._device
+        for device in self._devices:
+            if device_id == device.device_id:
+                return device
         return None
 
 
@@ -67,6 +73,26 @@ async def test_light_setup_creates_one_entity(hass: HomeAssistant) -> None:
 
     assert len(added) == 1
     assert added[0].unique_id == f"vivosun_growhub_{_DEV_ID}_light"
+
+
+async def test_light_setup_creates_entity_for_each_controller(hass: HomeAssistant) -> None:
+    coordinator = _StubCoordinator([_controller_device(_DEV_ID), _controller_device(_DEV_ID_2)])
+    entry = MockConfigEntry(domain=DOMAIN, title="t", data={})
+    runtime = RuntimeData(entry_id=entry.entry_id, coordinator=cast("object", coordinator))
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = runtime
+
+    added: list[VivosunLightEntity] = []
+
+    def _add(entities: list[VivosunLightEntity]) -> None:
+        added.extend(entities)
+
+    await async_setup_entry(hass, entry, _add)
+
+    assert len(added) == 2
+    assert {entity.unique_id for entity in added} == {
+        f"vivosun_growhub_{_DEV_ID}_light",
+        f"vivosun_growhub_{_DEV_ID_2}_light",
+    }
 
 
 async def test_light_state_mapping_and_availability() -> None:

@@ -29,34 +29,40 @@ if TYPE_CHECKING:
 from homeassistant.components.fan import FanEntityFeature
 
 _DEV_ID = "dev-1"
+_DEV_ID_2 = "dev-2"
+
+
+def _controller_device(device_id: str) -> DeviceInfo:
+    return DeviceInfo(
+        device_id=device_id,
+        client_id=f"vivosun-VSCTLE42A-acc-{device_id}",
+        topic_prefix=f"prefix/{device_id}",
+        name=f"GrowHub {device_id}",
+        online=True,
+        scene_id=66078,
+        device_type="controller",
+    )
 
 
 class _StubCoordinator:
-    def __init__(self) -> None:
+    def __init__(self, devices: list[DeviceInfo] | None = None) -> None:
         self.data: dict[str, object] = {}
-        self._device = DeviceInfo(
-            device_id=_DEV_ID,
-            client_id="vivosun-VSCTLE42A-acc-dev-1",
-            topic_prefix="prefix",
-            name="GrowHub",
-            online=True,
-            scene_id=66078,
-            device_type="controller",
-        )
+        self._devices = devices or [_controller_device(_DEV_ID)]
         self.is_mqtt_connected = True
         self.async_publish_shadow_update = AsyncMock()
 
     @property
     def device(self) -> DeviceInfo:
-        return self._device
+        return self._devices[0]
 
     @property
     def devices(self) -> list[DeviceInfo]:
-        return [self._device]
+        return self._devices
 
     def get_device(self, device_id: str) -> DeviceInfo | None:
-        if device_id == self._device.device_id:
-            return self._device
+        for device in self._devices:
+            if device_id == device.device_id:
+                return device
         return None
 
 
@@ -88,6 +94,33 @@ async def test_fan_setup_creates_two_entities(hass: HomeAssistant) -> None:
     assert len(added) == 2
     assert isinstance(added[0], VivosunCirculationFanEntity)
     assert isinstance(added[1], VivosunDuctFanEntity)
+    platform.async_register_entity_service.assert_called_once()
+
+
+async def test_fan_setup_creates_entities_for_each_controller(hass: HomeAssistant) -> None:
+    coordinator = _StubCoordinator([_controller_device(_DEV_ID), _controller_device(_DEV_ID_2)])
+    entry = MockConfigEntry(domain=DOMAIN, title="t", data={})
+    runtime = RuntimeData(entry_id=entry.entry_id, coordinator=cast("object", coordinator))
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = runtime
+
+    added: list[object] = []
+
+    def _add(entities: list[object]) -> None:
+        added.extend(entities)
+
+    platform = MagicMock()
+    platform.async_register_entity_service = MagicMock()
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr("custom_components.vivosun_growhub.fan.async_get_current_platform", lambda: platform)
+        await async_setup_entry(hass, entry, _add)
+
+    assert len(added) == 4
+    assert {entity.unique_id for entity in added} == {
+        f"vivosun_growhub_{_DEV_ID}_cfan",
+        f"vivosun_growhub_{_DEV_ID}_dfan",
+        f"vivosun_growhub_{_DEV_ID_2}_cfan",
+        f"vivosun_growhub_{_DEV_ID_2}_dfan",
+    }
     platform.async_register_entity_service.assert_called_once()
 
 

@@ -37,10 +37,11 @@ async def async_setup_entry(
     if coordinator is None:
         return
 
-    controllers = [d for d in coordinator.devices if d.device_type == "controller"]
-    if not controllers:
-        return
-    async_add_entities([VivosunLightEntity(coordinator, controllers[0].device_id)])
+    for device in coordinator.devices:
+        if device.device_type == "controller":
+
+            device_id = device.device_id
+            async_add_entities([VivosunLightEntity(coordinator, device_id)])
 
 
 class VivosunLightEntity(CoordinatorEntity[VivosunCoordinator], LightEntity):  # type: ignore[misc]
