@@ -190,6 +190,7 @@ _ALL_SENSOR_DESCRIPTIONS: tuple[VivosunSensorDescription, ...] = (
 
 _DEVICE_TYPE_SENSORS: dict[str, frozenset[str]] = {
     "controller": frozenset({"inTemp", "inHumi", "inVpd", "outTemp", "outHumi", "outVpd", "coreTemp", "rssi"}),
+    "dehumidifier": frozenset({"pTemp", "pHumi", "pVpd"}),
     "humidifier": frozenset({"pTemp", "pHumi", "pVpd", "waterLv", "coreTemp"}),
     "heater": frozenset({"pTemp", "pHumi", "pVpd"}),
 }

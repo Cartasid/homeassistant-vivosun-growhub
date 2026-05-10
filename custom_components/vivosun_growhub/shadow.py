@@ -15,6 +15,7 @@ from .const import (
     SHADOW_KEY_AUTO,
     SHADOW_KEY_CIRCULATOR_FAN,
     SHADOW_KEY_CONNECTED,
+    SHADOW_KEY_DEHUMIDIFIER,
     SHADOW_KEY_DUCT_FAN,
     SHADOW_KEY_HEATER,
     SHADOW_KEY_HUMIDIFIER,
@@ -39,6 +40,7 @@ _SUPPORTED_REPORTED_ROOT_KEYS: frozenset[str] = frozenset(
         "cFan",
         "dFan",
         "hmdf",
+        "dhmdf",
         "heat",
         "plan",
         "cali",
@@ -136,6 +138,17 @@ class HumidifierState(TypedDict, total=False):
     target_humidity: int | None
 
 
+
+class DehumidifierState(TypedDict, total=False):
+    """Normalized dehumidifier state slice from shadow.reported."""
+
+    on: bool
+    mode: int | None
+    state: int | None
+    pause: int | None
+    target_humidity: int | None
+
+
 class HeaterState(TypedDict, total=False):
     """Normalized heater state slice from shadow.reported."""
 
@@ -173,6 +186,7 @@ class ShadowV1State(TypedDict, total=False):
     cFan: CirculatorFanState
     dFan: DuctFanState
     hmdf: HumidifierState
+    dhmdf: DehumidifierState
     heat: HeaterState
     connection: ConnectionState
     plan: PlanState
@@ -228,6 +242,10 @@ def parse_reported_fragment(reported_fragment: dict[str, object]) -> ShadowV1Sta
     hmdf_raw = _as_dict(reported_fragment.get(SHADOW_KEY_HUMIDIFIER))
     if hmdf_raw is not None:
         parsed["hmdf"] = _parse_hmdf_state(hmdf_raw)
+
+    dhmdf_raw = _as_dict(reported_fragment.get(SHADOW_KEY_DEHUMIDIFIER))
+    if dhmdf_raw is not None:
+        parsed["dhmdf"] = _parse_dhmdf_state(dhmdf_raw)
 
     heat_raw = _as_dict(reported_fragment.get(SHADOW_KEY_HEATER))
     if heat_raw is not None:
@@ -408,6 +426,16 @@ def build_heat_target_payload(target_temp: int) -> dict[str, object]:
     return _build_desired_payload(SHADOW_KEY_HEATER, {"targetTemp": target_temp})
 
 
+def build_dhmdf_target_payload(target_humidity: int) -> dict[str, object]:
+    """Build desired dehumidifier auto target humidity (raw, scaled by 100)."""
+    return _build_desired_payload(SHADOW_KEY_DEHUMIDIFIER, {"auto": {"tHumi": target_humidity}})
+
+
+def build_dhmdf_on_payload(on: bool) -> dict[str, object]:
+    """Build desired dehumidifier pause payload (pause=0 means running)."""
+    return _build_desired_payload(SHADOW_KEY_DEHUMIDIFIER, {"pause": 0 if on else 1})
+
+
 def _extract_reported(document: dict[str, object]) -> dict[str, object]:
     state = _as_dict(document.get(SHADOW_ROOT_STATE))
     if state is not None:
@@ -510,6 +538,31 @@ def _parse_hmdf_state(hmdf: dict[str, object]) -> HumidifierState:
         water_warning=_as_bool(hmdf.get("waterWarn")),
         target_humidity=_normalize_sentinel_int(_as_int(hmdf.get("targetHumi"))),
     )
+
+
+
+def _parse_dhmdf_state(dhmdf: dict[str, object]) -> DehumidifierState:
+    # Build a sparse result so that partial update/accepted messages (e.g. only
+    # containing "pause") don't clobber unrelated fields via _deep_merge_mapping.
+    result: DehumidifierState = {}
+    auto = _as_dict(dhmdf.get("auto")) or {}
+    if "tHumi" in auto:
+        raw_humi = _normalize_sentinel_int(_as_int(auto.get("tHumi")))
+        if raw_humi is not None:
+            result["target_humidity"] = raw_humi
+    mode = _as_int(dhmdf.get("mode")) if "mode" in dhmdf else None
+    pause = _as_int(dhmdf.get("pause")) if "pause" in dhmdf else None
+    if mode is not None:
+        result["mode"] = mode
+    if pause is not None:
+        result["pause"] = pause
+    if "state" in dhmdf:
+        result["state"] = _as_int(dhmdf.get("state"))
+    # AeroDrain D12: mode=0 means auto-dehumidify (normal run state).
+    # Use only pause to determine on/off — pause=0 means running.
+    if "pause" in dhmdf:
+        result["on"] = pause == 0
+    return result
 
 
 def _parse_heat_state(heat: dict[str, object]) -> HeaterState:
