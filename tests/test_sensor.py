@@ -505,6 +505,27 @@ async def test_sensor_setup_creates_probe_sensors_for_humidifier(hass: HomeAssis
     }
 
 
+async def test_sensor_setup_creates_probe_sensors_for_dehumidifier(hass: HomeAssistant) -> None:
+    coordinator = _StubCoordinator(device_type="dehumidifier")
+    entry = MockConfigEntry(domain=DOMAIN, title="t", data={})
+    runtime = RuntimeData(entry_id=entry.entry_id, coordinator=cast("object", coordinator))
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = runtime
+
+    added: list[VivosunChannelSensorEntity] = []
+
+    def _add(entities: list[VivosunChannelSensorEntity]) -> None:
+        added.extend(entities)
+
+    await async_setup_entry(hass, entry, _add)
+
+    assert len(added) == 3
+    assert {entity.unique_id for entity in added} == {
+        f"vivosun_growhub_{_DEV_ID}_pTemp",
+        f"vivosun_growhub_{_DEV_ID}_pHumi",
+        f"vivosun_growhub_{_DEV_ID}_pVpd",
+    }
+
+
 async def test_sensor_water_level_scales_raw_value(hass: HomeAssistant) -> None:
     coordinator = _StubCoordinator(device_type="humidifier")
     coordinator.data = {"sensors": {_DEV_ID: {"waterLv": 20000}}}

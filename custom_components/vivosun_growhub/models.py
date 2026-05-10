@@ -58,12 +58,12 @@ def infer_device_type(name: str, client_id: str = "") -> str:
     model_token = _client_model_token(client_id)
     if model_token.startswith("VSCTLE") or "growhub" in combined or "controller" in combined:
         return "controller"
+    if model_token.startswith("VSDRY") or "aerodrain" in combined or "dehumidifier" in combined:
+        return "dehumidifier"
     if model_token.startswith(("VSHMD", "VSHUM")) or "aerostream" in combined or "humidifier" in combined:
         return "humidifier"
     if model_token.startswith("VSHT") or "aeroflux" in combined or "heater" in combined:
         return "heater"
-    if model_token.startswith("VSDRY") or "aerodrain" in combined or "dehumidifier" in combined:
-        return "dehumidifier"
     if "growcam" in combined or "camera" in combined:
         return "camera"
     return "unknown"

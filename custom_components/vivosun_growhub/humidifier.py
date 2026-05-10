@@ -213,6 +213,17 @@ class VivosunDehumidifierEntity(CoordinatorEntity[VivosunCoordinator], Humidifie
         return None
 
     @property
+    def current_humidity(self) -> float | None:
+        """Return the current humidity from probe sensor when available."""
+        sensors = sensor_slice(self.coordinator, self._device_id)
+        raw = sensors.get("pHumi")
+        if isinstance(raw, bool):
+            return None
+        if isinstance(raw, int):
+            return raw / TEMP_SCALE_FACTOR
+        return None
+
+    @property
     def available(self) -> bool:
         """Return entity availability."""
         return is_entity_available(self.coordinator, self._device_id)

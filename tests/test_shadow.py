@@ -16,6 +16,8 @@ from custom_components.vivosun_growhub.shadow import (
     build_dfan_auto_mode_payload,
     build_dfan_auto_threshold_payload,
     build_dfan_level_payload,
+    build_dhmdf_on_payload,
+    build_dhmdf_target_payload,
     build_light_level_payload,
     build_light_mode_payload,
     build_light_spectrum_payload,
@@ -276,6 +278,11 @@ def test_non_level_payload_builders_match_required_structure() -> None:
     assert build_light_spectrum_payload(42) == {"state": {"desired": {"light": {"manu": {"spec": 42}}}}}
     assert build_cfan_oscillate_payload(True) == {"state": {"desired": {"cFan": {"osc": 1}}}}
     assert build_cfan_night_mode_payload(False) == {"state": {"desired": {"cFan": {"nw": 0}}}}
+    assert build_dhmdf_on_payload(True) == {"state": {"desired": {"dhmdf": {"pause": 0}}}}
+    assert build_dhmdf_on_payload(False) == {"state": {"desired": {"dhmdf": {"pause": 1}}}}
+    assert build_dhmdf_target_payload(6000) == {
+        "state": {"desired": {"dhmdf": {"auto": {"tHumi": 6000}}}}
+    }
     assert build_dfan_auto_mode_payload(True) == {"state": {"desired": {"dFan": {"mode": 1}}}}
     assert build_dfan_auto_threshold_payload("tMax", 2800) == {
         "state": {"desired": {"dFan": {"auto": {"tMax": 2800}}}}
@@ -309,3 +316,20 @@ def test_light_level_clamp_enforces_minimum() -> None:
     assert clamp_light_level(24) == 25
     assert clamp_light_level(25) == 25
     assert clamp_light_level(80) == 80
+
+
+def test_parse_reported_fragment_dehumidifier_sparse_state() -> None:
+    fragment: dict[str, object] = {
+        "dhmdf": {
+            "pause": 0,
+            "auto": {"tHumi": 6000},
+        }
+    }
+
+    parsed = parse_reported_fragment(fragment)
+
+    assert parsed["dhmdf"] == {
+        "pause": 0,
+        "on": True,
+        "target_humidity": 6000,
+    }

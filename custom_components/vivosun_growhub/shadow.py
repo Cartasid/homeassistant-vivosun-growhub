@@ -15,9 +15,9 @@ from .const import (
     SHADOW_KEY_AUTO,
     SHADOW_KEY_CIRCULATOR_FAN,
     SHADOW_KEY_CONNECTED,
+    SHADOW_KEY_DEHUMIDIFIER,
     SHADOW_KEY_DUCT_FAN,
     SHADOW_KEY_HEATER,
-    SHADOW_KEY_DEHUMIDIFIER,
     SHADOW_KEY_HUMIDIFIER,
     SHADOW_KEY_LEVEL,
     SHADOW_KEY_LIGHT,
@@ -202,6 +202,9 @@ class ChannelSensorState(TypedDict, total=False):
     outTemp: int | None
     outHumi: int | None
     outVpd: int | None
+    bTemp: int | None
+    bHumi: int | None
+    bVpd: int | None
     pTemp: int | None
     pHumi: int | None
     pVpd: int | None
@@ -606,6 +609,7 @@ def _parse_channel_sensor_object(payload: dict[str, object]) -> ChannelSensorSta
     for key in (
         "inTemp", "inHumi", "inVpd",
         "outTemp", "outHumi", "outVpd",
+        "bTemp", "bHumi", "bVpd",
         "pTemp", "pHumi", "pVpd",
         "waterLv", "coreTemp", "rssi",
     ):

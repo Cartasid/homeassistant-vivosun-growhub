@@ -80,6 +80,7 @@ _ALL_SENSOR_DESCRIPTIONS: tuple[VivosunSensorDescription, ...] = (
         key="inside_humidity",
         name="Inside Humidity",
         channel_key="inHumi",
+        channel_key_aliases=("bHumi",),
         quantity="humidity",
         device_class=SensorDeviceClass.HUMIDITY,
         native_unit_of_measurement=PERCENTAGE,
