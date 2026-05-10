@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from homeassistant.components.diagnostics import async_redact_data
 
-from .const import DOMAIN
+from .const import DOMAIN, OPTION_SUPPORT_CAPTURE_ENABLED
 from .redaction import redact_identifier, sanitize_mapping_for_debug
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-    from datetime import datetime
-
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
@@ -64,6 +63,10 @@ async def async_get_config_entry_diagnostics(
         device = coordinator.device
     except RuntimeError:
         device = None
+    discovered_devices = _build_discovered_device_inventory(
+        coordinator,
+        primary_device_id=device.device_id if device else None,
+    )
     snapshot = coordinator.data if isinstance(coordinator.data, dict) else {}
     shadow = None
     sensors = snapshot.get("sensors")
@@ -85,8 +88,11 @@ async def async_get_config_entry_diagnostics(
     if not isinstance(mqtt_connected, bool):
         mqtt_connected = coordinator.is_mqtt_connected
 
-    last_update = coordinator.last_update_success_time
-    last_update_iso = _as_iso(last_update)
+    last_update = getattr(coordinator, "last_update_success_time", None)
+    last_update_iso = _as_iso(last_update) if isinstance(last_update, datetime) else None
+    last_update_success = getattr(coordinator, "last_update_success", None)
+    if not isinstance(last_update_success, bool):
+        last_update_success = None
 
     diagnostics_payload: dict[str, Any] = {
         "config_entry": redacted_entry,
@@ -100,15 +106,21 @@ async def async_get_config_entry_diagnostics(
             "client_id": device.client_id,
             "topic_prefix": device.topic_prefix,
         },
+        "discovered_devices": discovered_devices,
+        "support_capture": coordinator.support_capture_snapshot(),
         "coordinator": {
             "mqtt_connected": mqtt_connected,
+            "support_capture_enabled": bool(config_entry.options.get(OPTION_SUPPORT_CAPTURE_ENABLED, False)),
+            "support_capture_active": coordinator.support_capture_active,
+            "last_update_success": last_update_success,
             "shadow_keys": shadow_keys,
             "sensor_keys": sensor_keys,
             "last_update_success_time": last_update_iso,
         },
     }
     redacted_diagnostics = async_redact_data(diagnostics_payload, _DIAGNOSTICS_REDACT)
-    return sanitize_mapping_for_debug(redacted_diagnostics)
+    sanitized_diagnostics = sanitize_mapping_for_debug(redacted_diagnostics)
+    return cast("dict[str, Any]", _json_safe_value(sanitized_diagnostics))
 
 
 def _as_iso(value: datetime | None) -> str | None:
@@ -121,3 +133,51 @@ def _redact_entry_identifier(value: str | None) -> str | None:
     if value is None:
         return None
     return redact_identifier(value)
+
+
+def _json_safe_value(value: object) -> object:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe_value(nested_value) for key, nested_value in value.items()}
+    if isinstance(value, list):
+        return [_json_safe_value(item) for item in value]
+    return f"<{type(value).__name__}>"
+
+
+def _build_discovered_device_inventory(
+    coordinator: object,
+    *,
+    primary_device_id: str | None,
+) -> list[dict[str, object]]:
+    inventory: list[dict[str, object]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    for collection_name in ("devices", "camera_devices"):
+        devices = getattr(coordinator, collection_name, ())
+        if not isinstance(devices, list):
+            continue
+        for candidate in devices:
+            device_id = getattr(candidate, "device_id", "")
+            client_id = getattr(candidate, "client_id", "")
+            topic_prefix = getattr(candidate, "topic_prefix", "")
+            key = (device_id, client_id, topic_prefix)
+            if key in seen:
+                continue
+            seen.add(key)
+            inventory.append(
+                {
+                    "name": getattr(candidate, "name", ""),
+                    "online": getattr(candidate, "online", False),
+                    "device_type": getattr(candidate, "device_type", "unknown"),
+                    "scene_id": getattr(candidate, "scene_id", 0),
+                    "device_id": device_id,
+                    "client_id": client_id,
+                    "topic_prefix": topic_prefix,
+                    "is_primary": bool(primary_device_id and device_id == primary_device_id),
+                }
+            )
+
+    return inventory
