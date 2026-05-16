@@ -28,6 +28,7 @@
     }
   },
   "services": {
-    "set_duct_fan_auto_threshold": "mdi:tune-variant"
+    "set_duct_fan_auto_threshold": "mdi:tune-variant",
+    "set_aerolush_aircd": "mdi:air-conditioner"
   }
 }

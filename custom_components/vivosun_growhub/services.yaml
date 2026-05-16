@@ -54,10 +54,7 @@ stop_support_capture:
         text:
 set_aerolush_aircd:
   name: Set AeroLush AirCD
-  description: >-
-    Diagnostic/fallback service that publishes a raw AeroLush C08 aircd
-    desired-state update. Prefer the AeroLush C08 climate entity for normal
-    control; use this only for diagnostics or recovery.
+  description: Diagnostic/fallback service that publishes a raw AeroLush C08 aircd desired-state update. Prefer the AeroLush C08 climate entity for normal control.
   fields:
     entry_id:
       name: Entry ID
@@ -67,9 +64,7 @@ set_aerolush_aircd:
         text:
     device_id:
       name: Device ID
-      description: >-
-        Optional Vivosun device id of the AeroLush C08. Required only if zero or
-        multiple AeroLush devices are present.
+      description: Optional Vivosun device id of the AeroLush C08. Required only if zero or multiple AeroLush devices are present.
       required: false
       selector:
         text:
