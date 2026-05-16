@@ -15,6 +15,7 @@ from .const import (
     DOMAIN,
     OPTION_SUPPORT_CAPTURE_ENABLED,
     PLATFORMS,
+    SERVICE_SET_AEROLUSH_AIRCD,
     SERVICE_START_SUPPORT_CAPTURE,
     SERVICE_STOP_SUPPORT_CAPTURE,
     SUPPORT_CAPTURE_DEFAULT_MAX_EVENTS,
@@ -22,6 +23,7 @@ from .const import (
 from .coordinator import VivosunCoordinator
 from .exceptions import VivosunGrowhubError
 from .models import RuntimeData
+from .shadow import build_aircd_payload
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -54,6 +56,9 @@ def _register_services(hass: HomeAssistant) -> None:
     async def _handle_stop(call: ServiceCall) -> None:
         await _async_handle_stop_support_capture(hass, call)
 
+    async def _handle_set_aerolush_aircd(call: ServiceCall) -> None:
+        await _async_handle_set_aerolush_aircd(hass, call)
+
     if not hass.services.has_service(DOMAIN, SERVICE_START_SUPPORT_CAPTURE):
         hass.services.async_register(
             DOMAIN,
@@ -74,6 +79,23 @@ def _register_services(hass: HomeAssistant) -> None:
             SERVICE_STOP_SUPPORT_CAPTURE,
             _handle_stop,
             schema=vol.Schema({vol.Optional("entry_id"): str}),
+        )
+    if not hass.services.has_service(DOMAIN, SERVICE_SET_AEROLUSH_AIRCD):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_SET_AEROLUSH_AIRCD,
+            _handle_set_aerolush_aircd,
+            schema=vol.Schema(
+                {
+                    vol.Optional("entry_id"): str,
+                    vol.Optional("device_id"): str,
+                    vol.Optional("state"): vol.All(vol.Coerce(int), vol.Range(min=0, max=1)),
+                    vol.Optional("func"): vol.All(vol.Coerce(int), vol.Range(min=1, max=4)),
+                    vol.Optional("tTemp"): vol.All(vol.Coerce(int), vol.Range(min=1000, max=4000)),
+                    vol.Optional("tHumi"): vol.All(vol.Coerce(int), vol.Range(min=0, max=10000)),
+                    vol.Optional("wdLv"): vol.All(vol.Coerce(int), vol.In((50, 100))),
+                }
+            ),
         )
 
 
@@ -110,6 +132,39 @@ async def _async_handle_stop_support_capture(hass: HomeAssistant, call: ServiceC
     if coordinator is None:
         raise ServiceValidationError("Vivosun coordinator is not loaded")
     await coordinator.async_stop_support_capture()
+
+
+async def _async_handle_set_aerolush_aircd(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Publish a raw AeroLush C08 aircd desired-state update (diagnostic/fallback)."""
+    runtime = _resolve_runtime_for_service(hass, cast("str | None", call.data.get("entry_id")))
+    coordinator = runtime.coordinator
+    if coordinator is None:
+        raise ServiceValidationError("Vivosun coordinator is not loaded")
+
+    fields: dict[str, int] = {
+        key: cast("int", call.data[key])
+        for key in ("state", "func", "tTemp", "tHumi", "wdLv")
+        if key in call.data
+    }
+    if not fields:
+        raise ServiceValidationError(
+            "At least one of state, func, tTemp, tHumi or wdLv is required"
+        )
+
+    device_id = cast("str | None", call.data.get("device_id"))
+    if device_id is None:
+        air_conditioners = [d for d in coordinator.devices if d.device_type == "air_conditioner"]
+        if len(air_conditioners) != 1:
+            raise ServiceValidationError(
+                "device_id is required when zero or multiple AeroLush devices are present"
+            )
+        device_id = air_conditioners[0].device_id
+
+    try:
+        payload = build_aircd_payload(fields)
+    except ValueError as err:
+        raise ServiceValidationError(str(err)) from err
+    await coordinator.async_publish_shadow_update(payload, device_id=device_id)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -159,5 +214,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not domain_data:
         hass.services.async_remove(DOMAIN, SERVICE_START_SUPPORT_CAPTURE)
         hass.services.async_remove(DOMAIN, SERVICE_STOP_SUPPORT_CAPTURE)
+        hass.services.async_remove(DOMAIN, SERVICE_SET_AEROLUSH_AIRCD)
         hass.data.pop(DOMAIN, None)
     return True

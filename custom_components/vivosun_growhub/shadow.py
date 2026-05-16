@@ -6,12 +6,19 @@ import json
 from typing import TYPE_CHECKING, TypedDict, cast
 
 from .const import (
+    AIRCD_FAN_QUIET,
+    AIRCD_FAN_STANDARD,
+    AIRCD_FUNC_COOL,
+    AIRCD_FUNC_DRY,
+    AIRCD_FUNC_FAN,
+    AIRCD_FUNC_HEAT,
     CFAN_LEVEL_MAP,
     CFAN_NATURAL_WIND_VALUE,
     DFAN_LEVEL_MAP,
     LIGHT_MIN_BRIGHTNESS,
     MODE_AUTO,
     SENSOR_UNAVAILABLE_SENTINEL,
+    SHADOW_KEY_AIR_CONDITIONER,
     SHADOW_KEY_AUTO,
     SHADOW_KEY_CIRCULATOR_FAN,
     SHADOW_KEY_CONNECTED,
@@ -42,6 +49,7 @@ _SUPPORTED_REPORTED_ROOT_KEYS: frozenset[str] = frozenset(
         "hmdf",
         "dhmdf",
         "heat",
+        "aircd",
         "plan",
         "cali",
         "btDev",
@@ -75,6 +83,7 @@ _DFAN_AUTO_FIELDS: frozenset[str] = frozenset(
         "exChk",
     }
 )
+_AIRCD_PAYLOAD_FIELDS: frozenset[str] = frozenset({"state", "func", "tTemp", "tHumi", "wdLv"})
 
 
 class ShadowParseError(ValueError):
@@ -159,6 +168,22 @@ class HeaterState(TypedDict, total=False):
     target_temp: int | None
 
 
+class AirConditionerState(TypedDict, total=False):
+    """Normalized AeroLush air conditioner state slice from shadow.reported."""
+
+    on: bool
+    mode: int | None
+    in_plan: int | None
+    state: int | None
+    pause: int | None
+    function: int | None
+    fan_level: int | None
+    target_min_temp: int | None
+    target_temp: int | None
+    target_humidity: int | None
+    target_vpd: int | None
+
+
 class ConnectionState(TypedDict):
     """Normalized root connectivity state from shadow.reported."""
 
@@ -188,6 +213,7 @@ class ShadowV1State(TypedDict, total=False):
     hmdf: HumidifierState
     dhmdf: DehumidifierState
     heat: HeaterState
+    aircd: AirConditionerState
     connection: ConnectionState
     plan: PlanState
     reported_supported: dict[str, object]
@@ -250,6 +276,10 @@ def parse_reported_fragment(reported_fragment: dict[str, object]) -> ShadowV1Sta
     heat_raw = _as_dict(reported_fragment.get(SHADOW_KEY_HEATER))
     if heat_raw is not None:
         parsed["heat"] = _parse_heat_state(heat_raw)
+
+    aircd_raw = _as_dict(reported_fragment.get(SHADOW_KEY_AIR_CONDITIONER))
+    if aircd_raw is not None:
+        parsed["aircd"] = _parse_aircd_state(aircd_raw)
 
     if SHADOW_KEY_CONNECTED in reported_fragment:
         parsed["connection"] = ConnectionState(connected=_as_bool(reported_fragment.get(SHADOW_KEY_CONNECTED)))
@@ -436,6 +466,49 @@ def build_dhmdf_on_payload(on: bool) -> dict[str, object]:
     return _build_desired_payload(SHADOW_KEY_DEHUMIDIFIER, {"pause": 0 if on else 1})
 
 
+def build_aircd_payload(fields: dict[str, int]) -> dict[str, object]:
+    """Build a desired AeroLush air conditioner payload for `desired.aircd`."""
+    invalid = set(fields) - _AIRCD_PAYLOAD_FIELDS
+    if invalid:
+        raise ValueError(f"Unsupported aircd payload field(s): {sorted(invalid)}")
+    if not fields:
+        raise ValueError("aircd payload requires at least one field")
+    return _build_desired_payload(SHADOW_KEY_AIR_CONDITIONER, dict(fields))
+
+
+def build_aircd_state_payload(on: bool) -> dict[str, object]:
+    """Build desired AeroLush air conditioner on/off payload."""
+    return build_aircd_payload({"state": 1 if on else 0})
+
+
+def build_aircd_function_payload(function: int) -> dict[str, object]:
+    """Build desired AeroLush function payload (1=cool, 2=heat, 3=dry, 4=fan)."""
+    if function not in (AIRCD_FUNC_COOL, AIRCD_FUNC_HEAT, AIRCD_FUNC_DRY, AIRCD_FUNC_FAN):
+        raise ValueError("aircd function must be one of 1, 2, 3, 4")
+    return build_aircd_payload({"func": function})
+
+
+def build_aircd_target_temp_payload(target_temp: int) -> dict[str, object]:
+    """Build desired AeroLush target temperature (raw, scaled by 100)."""
+    if target_temp < 1000 or target_temp > 4000:
+        raise ValueError("aircd target temp must be in range 1000..4000")
+    return build_aircd_payload({"tTemp": target_temp})
+
+
+def build_aircd_target_humidity_payload(target_humidity: int) -> dict[str, object]:
+    """Build desired AeroLush target humidity (raw, scaled by 100)."""
+    if target_humidity < 0 or target_humidity > 10000:
+        raise ValueError("aircd target humidity must be in range 0..10000")
+    return build_aircd_payload({"tHumi": target_humidity})
+
+
+def build_aircd_fan_level_payload(level: int) -> dict[str, object]:
+    """Build desired AeroLush fan level payload (50=quiet, 100=standard)."""
+    if level not in (AIRCD_FAN_QUIET, AIRCD_FAN_STANDARD):
+        raise ValueError("aircd fan level must be 50 (quiet) or 100 (standard)")
+    return build_aircd_payload({"wdLv": level})
+
+
 def _extract_reported(document: dict[str, object]) -> dict[str, object]:
     state = _as_dict(document.get(SHADOW_ROOT_STATE))
     if state is not None:
@@ -584,6 +657,35 @@ def _parse_heat_state(heat: dict[str, object]) -> HeaterState:
         state=_as_int(heat.get("state")),
         target_temp=_normalize_sentinel_int(_as_int(heat.get("targetTemp"))),
     )
+
+
+def _parse_aircd_state(aircd: dict[str, object]) -> AirConditionerState:
+    # Build a sparse result so that partial update/accepted messages don't
+    # clobber unrelated fields via _deep_merge_mapping (see _parse_dhmdf_state).
+    result: AirConditionerState = {}
+    if "state" in aircd:
+        state = _as_int(aircd.get("state"))
+        result["state"] = state
+        result["on"] = state == 1
+    if SHADOW_KEY_MODE in aircd:
+        result["mode"] = _as_int(aircd.get(SHADOW_KEY_MODE))
+    if "inPlan" in aircd:
+        result["in_plan"] = _as_int(aircd.get("inPlan"))
+    if "pause" in aircd:
+        result["pause"] = _as_int(aircd.get("pause"))
+    if "func" in aircd:
+        result["function"] = _as_int(aircd.get("func"))
+    if "wdLv" in aircd:
+        result["fan_level"] = _as_int(aircd.get("wdLv"))
+    if "tMin" in aircd:
+        result["target_min_temp"] = _normalize_sentinel_int(_as_int(aircd.get("tMin")))
+    if "tTemp" in aircd:
+        result["target_temp"] = _normalize_sentinel_int(_as_int(aircd.get("tTemp")))
+    if "tHumi" in aircd:
+        result["target_humidity"] = _normalize_sentinel_int(_as_int(aircd.get("tHumi")))
+    if "tVpd" in aircd:
+        result["target_vpd"] = _normalize_sentinel_int(_as_int(aircd.get("tVpd")))
+    return result
 
 
 def _parse_plan_state(plan: dict[str, object]) -> PlanState:
