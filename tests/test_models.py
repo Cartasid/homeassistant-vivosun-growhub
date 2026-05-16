@@ -11,3 +11,15 @@ def test_infer_device_type_prefers_dehumidifier_over_humidifier_substring() -> N
 
 def test_infer_device_type_uses_dehumidifier_model_token() -> None:
     assert infer_device_type("Tent", "vivosun-VSDRYD12-acc-device-1") == "dehumidifier"
+
+
+def test_infer_device_type_uses_air_conditioner_model_token() -> None:
+    assert infer_device_type("Tent", "vivosun-VSACA08-acc-device-1") == "air_conditioner"
+
+
+def test_infer_device_type_detects_aerolush_name() -> None:
+    assert infer_device_type("AeroLush C08", "") == "air_conditioner"
+
+
+def test_infer_device_type_detects_air_conditioner_name() -> None:
+    assert infer_device_type("Tent Air Conditioner", "") == "air_conditioner"

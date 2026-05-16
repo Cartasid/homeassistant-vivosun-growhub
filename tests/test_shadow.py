@@ -10,6 +10,12 @@ import pytest
 from custom_components.vivosun_growhub.mqtt_client import ReceivedPublish
 from custom_components.vivosun_growhub.shadow import (
     ShadowParseError,
+    build_aircd_fan_level_payload,
+    build_aircd_function_payload,
+    build_aircd_payload,
+    build_aircd_state_payload,
+    build_aircd_target_humidity_payload,
+    build_aircd_target_temp_payload,
     build_cfan_level_payload,
     build_cfan_night_mode_payload,
     build_cfan_oscillate_payload,
@@ -362,3 +368,94 @@ def test_parse_reported_fragment_dehumidifier_sparse_state() -> None:
         "on": True,
         "target_humidity": 6000,
     }
+
+
+def test_parse_reported_fragment_air_conditioner_full_state() -> None:
+    fragment: dict[str, object] = {
+        "aircd": {
+            "state": 1,
+            "mode": 0,
+            "inPlan": 0,
+            "pause": 0,
+            "func": 1,
+            "wdLv": 100,
+            "tMin": 1600,
+            "tTemp": 2398,
+            "tHumi": 4966,
+            "tVpd": -6666,
+        }
+    }
+
+    parsed = parse_reported_fragment(fragment)
+
+    assert parsed["aircd"] == {
+        "state": 1,
+        "on": True,
+        "mode": 0,
+        "in_plan": 0,
+        "pause": 0,
+        "function": 1,
+        "fan_level": 100,
+        "target_min_temp": 1600,
+        "target_temp": 2398,
+        "target_humidity": 4966,
+        "target_vpd": None,
+    }
+    assert "aircd" in parsed["reported_supported"]
+
+
+def test_parse_reported_fragment_air_conditioner_sparse_state() -> None:
+    # Partial update messages must not clobber unrelated fields.
+    parsed = parse_reported_fragment({"aircd": {"state": 0}})
+    assert parsed["aircd"] == {"state": 0, "on": False}
+
+    parsed = parse_reported_fragment({"aircd": {"func": 3}})
+    assert parsed["aircd"] == {"function": 3}
+
+
+def test_build_aircd_payload_rejects_unknown_and_empty_fields() -> None:
+    with pytest.raises(ValueError):
+        build_aircd_payload({"bogus": 1})
+    with pytest.raises(ValueError):
+        build_aircd_payload({})
+
+
+def test_build_aircd_payload_structure() -> None:
+    assert build_aircd_payload({"state": 1, "func": 2}) == {
+        "state": {"desired": {"aircd": {"state": 1, "func": 2}}}
+    }
+
+
+def test_build_aircd_state_and_function_payloads() -> None:
+    assert build_aircd_state_payload(True) == {"state": {"desired": {"aircd": {"state": 1}}}}
+    assert build_aircd_state_payload(False) == {"state": {"desired": {"aircd": {"state": 0}}}}
+    assert build_aircd_function_payload(4) == {"state": {"desired": {"aircd": {"func": 4}}}}
+    with pytest.raises(ValueError):
+        build_aircd_function_payload(5)
+    with pytest.raises(ValueError):
+        build_aircd_function_payload(0)
+
+
+def test_build_aircd_target_temp_payload_validates_range() -> None:
+    assert build_aircd_target_temp_payload(2400) == {"state": {"desired": {"aircd": {"tTemp": 2400}}}}
+    with pytest.raises(ValueError):
+        build_aircd_target_temp_payload(999)
+    with pytest.raises(ValueError):
+        build_aircd_target_temp_payload(4001)
+
+
+def test_build_aircd_target_humidity_payload_validates_range() -> None:
+    assert build_aircd_target_humidity_payload(5500) == {
+        "state": {"desired": {"aircd": {"tHumi": 5500}}}
+    }
+    with pytest.raises(ValueError):
+        build_aircd_target_humidity_payload(-1)
+    with pytest.raises(ValueError):
+        build_aircd_target_humidity_payload(10001)
+
+
+def test_build_aircd_fan_level_payload_allows_only_quiet_and_standard() -> None:
+    assert build_aircd_fan_level_payload(50) == {"state": {"desired": {"aircd": {"wdLv": 50}}}}
+    assert build_aircd_fan_level_payload(100) == {"state": {"desired": {"aircd": {"wdLv": 100}}}}
+    with pytest.raises(ValueError):
+        build_aircd_fan_level_payload(75)

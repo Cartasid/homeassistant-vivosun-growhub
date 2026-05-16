@@ -52,3 +52,69 @@ stop_support_capture:
       required: false
       selector:
         text:
+set_aerolush_aircd:
+  name: Set AeroLush AirCD
+  description: Diagnostic/fallback service that publishes a raw AeroLush C08 aircd desired-state update. Prefer the AeroLush C08 climate entity for normal control.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Optional config entry id. Required only if multiple Vivosun entries are configured.
+      required: false
+      selector:
+        text:
+    device_id:
+      name: Device ID
+      description: Optional Vivosun device id of the AeroLush C08. Required only if zero or multiple AeroLush devices are present.
+      required: false
+      selector:
+        text:
+    state:
+      name: State
+      description: Power state (0 = off, 1 = on).
+      required: false
+      example: 1
+      selector:
+        number:
+          min: 0
+          max: 1
+          step: 1
+    func:
+      name: Function
+      description: Operating function (1 = cool, 2 = heat, 3 = dry, 4 = fan).
+      required: false
+      example: 1
+      selector:
+        number:
+          min: 1
+          max: 4
+          step: 1
+    tTemp:
+      name: Target Temperature (raw)
+      description: Target temperature scaled by 100 (for example 2400 = 24.00 C).
+      required: false
+      example: 2400
+      selector:
+        number:
+          min: 1000
+          max: 4000
+          step: 1
+    tHumi:
+      name: Target Humidity (raw)
+      description: Target humidity scaled by 100 (for example 5500 = 55.00 %).
+      required: false
+      example: 5500
+      selector:
+        number:
+          min: 0
+          max: 10000
+          step: 1
+    wdLv:
+      name: Fan Level
+      description: Fan level (50 = quiet, 100 = standard).
+      required: false
+      example: 100
+      selector:
+        number:
+          min: 50
+          max: 100
+          step: 50
