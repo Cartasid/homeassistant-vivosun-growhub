@@ -23,14 +23,25 @@ Required for unauthenticated requests:
 
 ```text
 Content-Type: application/json
+Server-Platform: android
+Api-Version: 1.0.5
+App-Version: 4.63.1
 ```
 
 Required for authenticated requests:
 
 ```text
+Server-Platform: android
+Api-Version: 1.0.5
+App-Version: 4.63.1
 login-token: <loginToken>
 access-token: <accessToken>
 ```
+
+Authenticated production POST request bodies are encrypted with the
+app-compatible `Request-Time`/`Request-Code` wrapper. `POST /user/login` remains
+plaintext JSON because it runs before account tokens are available. Responses
+remain plaintext JSON using the standard envelope.
 
 ### Standard response envelope
 

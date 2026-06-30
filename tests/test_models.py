@@ -13,6 +13,10 @@ def test_infer_device_type_uses_dehumidifier_model_token() -> None:
     assert infer_device_type("Tent", "vivosun-VSDRYD12-acc-device-1") == "dehumidifier"
 
 
+def test_infer_device_type_uses_vsctl_controller_model_token() -> None:
+    assert infer_device_type("Tent", "vivosun-VSCTL002-acc-device-1") == "controller"
+
+
 def test_infer_device_type_uses_air_conditioner_model_token() -> None:
     assert infer_device_type("Tent", "vivosun-VSACA08-acc-device-1") == "air_conditioner"
 

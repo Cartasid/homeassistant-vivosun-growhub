@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import cast
 
 import aiohttp
 import pytest
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.padding import PKCS7
 
 from custom_components.vivosun_growhub.api import VivosunApiClient
+from custom_components.vivosun_growhub.const import (
+    API_PROTOCOL_VERSION,
+    APP_VERSION,
+    SERVER_PLATFORM,
+)
 from custom_components.vivosun_growhub.exceptions import (
     VivosunAuthError,
     VivosunConnectionError,
@@ -63,6 +72,55 @@ def _valid_tokens() -> AuthTokens:
     )
 
 
+def _call_headers(call: dict[str, object]) -> dict[str, str]:
+    kwargs = cast("dict[str, object]", call["kwargs"])
+    return cast("dict[str, str]", kwargs["headers"])
+
+
+def _call_data(call: dict[str, object]) -> bytes:
+    kwargs = cast("dict[str, object]", call["kwargs"])
+    data = kwargs["data"]
+    assert isinstance(data, bytes)
+    return data
+
+
+def _decode_plain_request_body(call: dict[str, object]) -> dict[str, object]:
+    return cast("dict[str, object]", json.loads(_call_data(call)))
+
+
+def _decrypt_request_body(call: dict[str, object]) -> dict[str, object]:
+    headers = _call_headers(call)
+    request_time = headers["Request-Time"]
+    request_code = headers["Request-Code"]
+    parts = request_code.split("-", 5)
+    assert len(parts) == 6
+    assert parts[0] == "AC5"
+    key_start = int(parts[1])
+    key_end = int(parts[2])
+    iv_start = int(parts[3])
+    iv_end = int(parts[4])
+    salt = parts[5]
+
+    md5_hex = hashlib.md5(request_time.encode()).hexdigest()
+    aes_key = md5_hex[key_start:key_end].encode()
+    aes_iv = salt[iv_start:iv_end].encode()
+    encrypted_wrapper = _decode_plain_request_body(call)
+    encrypted_hex = encrypted_wrapper["content"]
+    assert isinstance(encrypted_hex, str)
+
+    decryptor = Cipher(algorithms.AES(aes_key), modes.CBC(aes_iv)).decryptor()
+    padded = decryptor.update(bytes.fromhex(encrypted_hex)) + decryptor.finalize()
+    unpadder = PKCS7(algorithms.AES.block_size).unpadder()
+    plaintext = unpadder.update(padded) + unpadder.finalize()
+    return cast("dict[str, object]", json.loads(plaintext))
+
+
+def _assert_base_headers(headers: dict[str, str]) -> None:
+    assert headers["Server-Platform"] == SERVER_PLATFORM
+    assert headers["Api-Version"] == API_PROTOCOL_VERSION
+    assert headers["App-Version"] == APP_VERSION
+
+
 async def test_login_success_returns_auth_tokens(caplog: pytest.LogCaptureFixture) -> None:
     """login() should parse envelope and return AuthTokens dataclass."""
     payload = {
@@ -89,6 +147,13 @@ async def test_login_success_returns_auth_tokens(caplog: pytest.LogCaptureFixtur
     assert "access-123" not in caplog.text
     assert "login-123" not in caplog.text
     assert "refresh-123" not in caplog.text
+    request = cast("_MockSession", session).calls[0]
+    headers = _call_headers(request)
+    _assert_base_headers(headers)
+    assert "Request-Code" not in headers
+    assert _decode_plain_request_body(request)["email"] == "user@example.com"
+    kwargs = cast("dict[str, object]", request["kwargs"])
+    assert "json" not in kwargs
 
 
 async def test_login_auth_failure_message_raises_auth_error() -> None:
@@ -151,9 +216,40 @@ async def test_get_devices_maps_grow_group_to_device_info() -> None:
     assert devices[1].scene_id == 1002
     assert devices[1].device_type == "humidifier"
 
-    headers = cast("dict[str, str]", mock_session.calls[0]["kwargs"]["headers"])
+    headers = _call_headers(mock_session.calls[0])
+    _assert_base_headers(headers)
     assert headers["login-token"] == "login-token-value"
     assert headers["access-token"] == "access-token-value"
+    assert "Request-Code" not in headers
+
+
+async def test_get_devices_maps_vsctl_controller_token_to_controller() -> None:
+    payload = {
+        "code": 0,
+        "success": True,
+        "message": "success",
+        "data": {
+            "deviceGroup": {
+                "GROW": [
+                    {
+                        "deviceId": "device-1",
+                        "clientId": "vivosun-VSCTL002-account-device-1",
+                        "topicPrefix": "vivosun/topic/1",
+                        "name": "E25 Controller",
+                        "onlineStatus": 1,
+                        "scene": {"sceneId": 1001},
+                    }
+                ]
+            }
+        },
+    }
+    session = cast("aiohttp.ClientSession", _MockSession(responses=[_MockResponse(status=200, payload=payload)]))
+    client = VivosunApiClient(session)
+
+    devices = await client.get_devices(_valid_tokens())
+
+    assert len(devices) == 1
+    assert devices[0].device_type == "controller"
 
 
 async def test_get_devices_coerces_string_online_status() -> None:
@@ -184,6 +280,38 @@ async def test_get_devices_coerces_string_online_status() -> None:
 
     assert len(devices) == 1
     assert devices[0].online is True
+
+
+async def test_authenticated_post_requests_are_encrypted() -> None:
+    """Authenticated POST bodies should use the Vivosun app-compatible wrapper."""
+    payload = {
+        "code": 0,
+        "success": True,
+        "message": "success",
+        "data": {
+            "awsHost": "example.iot.us-east-2.amazonaws.com",
+            "awsRegion": "us-east-2",
+            "awsIdentityId": "us-east-2:abcd",
+            "awsOpenIdToken": "aws-open-id-token",
+            "awsPort": 443,
+        },
+    }
+    mock_session = _MockSession(responses=[_MockResponse(status=200, payload=payload)])
+    session = cast("aiohttp.ClientSession", mock_session)
+    client = VivosunApiClient(session)
+
+    await client.get_aws_identity(_valid_tokens())
+
+    request = mock_session.calls[0]
+    headers = _call_headers(request)
+    _assert_base_headers(headers)
+    assert headers["login-token"] == "login-token-value"
+    assert headers["access-token"] == "access-token-value"
+    assert headers["Request-Code"].startswith("AC5-")
+    assert headers["Request-Time"].isdigit()
+    assert _decrypt_request_body(request) == {"awsIdentityId": "", "attachPolicy": True}
+    kwargs = cast("dict[str, object]", request["kwargs"])
+    assert "json" not in kwargs
 
 
 async def test_get_devices_handles_missing_online_status() -> None:
@@ -445,6 +573,66 @@ async def test_get_point_log_empty_list_returns_empty_snapshot() -> None:
     )
 
     assert snapshot == {}
+
+
+async def test_get_point_log_encrypts_expected_payload() -> None:
+    payload = {
+        "code": 0,
+        "success": True,
+        "message": "success",
+        "data": {"iotDataLogList": []},
+    }
+    mock_session = _MockSession(responses=[_MockResponse(status=200, payload=payload)])
+    session = cast("aiohttp.ClientSession", mock_session)
+    client = VivosunApiClient(session)
+    from custom_components.vivosun_growhub.models import DeviceInfo
+
+    await client.get_point_log(
+        _valid_tokens(),
+        DeviceInfo(
+            device_id="device-1",
+            client_id="vivosun-device-1",
+            topic_prefix="topic/1",
+            name="GrowHub A",
+            online=True,
+            scene_id=66078,
+        ),
+        start_time=100,
+        end_time=200,
+    )
+
+    assert _decrypt_request_body(mock_session.calls[0]) == {
+        "sceneId": 66078,
+        "deviceId": "device-1",
+        "startTime": 100,
+        "endTime": 200,
+        "reportType": 0,
+        "orderBy": "asc",
+        "timeLevel": "ONE_MINUTE",
+    }
+
+
+async def test_get_plan_stage_info_encrypts_expected_payload() -> None:
+    payload = {
+        "code": 0,
+        "success": True,
+        "message": "success",
+        "data": {
+            "stageName": "Vegetative",
+            "icon": "veg",
+            "planStageContent": "{\"light\": {\"start\": \"08:00\"}}",
+        },
+    }
+    mock_session = _MockSession(responses=[_MockResponse(status=200, payload=payload)])
+    session = cast("aiohttp.ClientSession", mock_session)
+    client = VivosunApiClient(session)
+
+    stage_info = await client.get_plan_stage_info(_valid_tokens(), "stage-123")
+
+    assert stage_info is not None
+    assert stage_info.stage_name == "Vegetative"
+    assert stage_info.content == {"light": {"start": "08:00"}}
+    assert _decrypt_request_body(mock_session.calls[0]) == {"userPlanStageId": "stage-123"}
 
 
 async def test_get_aws_identity_returns_typed_payload(caplog: pytest.LogCaptureFixture) -> None:
