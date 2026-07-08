@@ -278,6 +278,13 @@ Relevant keys:
       "vpdMax": 180
     }
   },
+  "aircd": {
+    "state": 1,
+    "func": 3,
+    "wdLv": 50,
+    "tTemp": 2400,
+    "tHumi": 5500
+  },
   "connection": {
     "connected": true
   }
@@ -285,6 +292,22 @@ Relevant keys:
 ```
 
 ## Device-specific control mappings
+
+### AeroLush C08 air conditioner
+
+The AeroLush C08 uses the `aircd` shadow object.
+
+| Field | Meaning | Scaling / values |
+| --- | --- | --- |
+| `state` | Power state | `0` = off, `1` = on |
+| `func` | Operating function | `1` = cool, `2` = heat, `3` = dry, `4` = fan |
+| `tTemp` | Target temperature | scaled by 100, for example `2400` = `24.00 C` |
+| `tHumi` | Target humidity | scaled by 100, for example `5500` = `55.00 %` |
+| `wdLv` | Internal fan level | `50` = quiet, `100` = standard |
+
+Control updates are published as partial desired-state updates, for example
+`{"state":{"desired":{"aircd":{"state":1,"func":3,"tHumi":5500,"wdLv":50}}}}`.
+For dry mode, the effective target is humidity (`tHumi`), not temperature (`tTemp`).
 
 ### Light
 
