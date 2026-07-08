@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock
 
 import pytest
+from homeassistant.components.climate import ClimateEntityFeature
 from homeassistant.components.climate.const import HVACAction, HVACMode
 from homeassistant.const import UnitOfTemperature
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -294,6 +295,39 @@ async def test_aerolush_hvac_mode_off_and_function_modes() -> None:
         coordinator.data = {"shadows": {_AC_DEV_ID: {"aircd": {"state": 1, "function": func}}}}
         assert entity.hvac_mode == mode
         assert entity.hvac_action == action
+
+
+async def test_aerolush_dry_mode_uses_humidity_target_not_temperature() -> None:
+    coordinator = _AeroLushStubCoordinator()
+    coordinator.data = {
+        "shadows": {
+            _AC_DEV_ID: {
+                "aircd": {
+                    "state": 1,
+                    "function": 3,
+                    "target_temp": 2400,
+                    "target_humidity": 5500,
+                }
+            }
+        },
+        "sensors": {_AC_DEV_ID: {"pTemp": 2175, "pHumi": 5012}},
+    }
+    entity = _make_ac_entity(coordinator)
+
+    assert entity.hvac_mode == HVACMode.DRY
+    assert entity.hvac_action == HVACAction.DRYING
+    assert not entity.supported_features & ClimateEntityFeature.TARGET_TEMPERATURE
+    assert entity.supported_features & ClimateEntityFeature.TARGET_HUMIDITY
+    assert entity.target_temperature is None
+    assert entity.target_humidity == pytest.approx(55.0)
+
+    await entity.async_set_temperature(temperature=24.0)
+    coordinator.async_publish_shadow_update.assert_not_awaited()
+
+    await entity.async_set_humidity(58)
+    coordinator.async_publish_shadow_update.assert_awaited_once_with(
+        build_aircd_target_humidity_payload(5800), device_id=_AC_DEV_ID
+    )
 
 
 async def test_aerolush_fahrenheit_bounds_and_conversion() -> None:

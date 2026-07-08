@@ -306,6 +306,18 @@ class VivosunAeroLushClimateEntity(CoordinatorEntity[VivosunCoordinator], Climat
     _attr_target_humidity_step = 1
     _enable_turn_on_off_backwards_compatibility = ClimateEntityFeature(0) == _EXPLICIT_TURN_FEATURES
 
+    @property
+    def supported_features(self) -> ClimateEntityFeature:
+        """Return supported features for the current AeroLush function."""
+        features = (
+            _EXPLICIT_TURN_FEATURES
+            | ClimateEntityFeature.TARGET_HUMIDITY
+            | ClimateEntityFeature.FAN_MODE
+        )
+        if self.hvac_mode != HVACMode.DRY:
+            features |= ClimateEntityFeature.TARGET_TEMPERATURE
+        return features
+
     def __init__(
         self,
         coordinator: VivosunCoordinator,
@@ -364,6 +376,8 @@ class VivosunAeroLushClimateEntity(CoordinatorEntity[VivosunCoordinator], Climat
     @property
     def target_temperature(self) -> float | None:
         """Return the target temperature."""
+        if self.hvac_mode == HVACMode.DRY:
+            return None
         aircd = self._aircd_state()
         target = aircd.get("target_temp")
         if isinstance(target, int):
@@ -470,6 +484,8 @@ class VivosunAeroLushClimateEntity(CoordinatorEntity[VivosunCoordinator], Climat
 
     async def async_set_temperature(self, **kwargs: object) -> None:
         """Set the target temperature."""
+        if self.hvac_mode == HVACMode.DRY:
+            return
         temperature = kwargs.get("temperature")
         if not isinstance(temperature, (int, float)):
             return
