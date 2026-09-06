@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, ClassVar, cast
 
 from homeassistant.components.climate import (
@@ -40,8 +41,6 @@ from .shadow import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.device_registry import DeviceInfo
@@ -71,12 +70,6 @@ _HVAC_MODE_TO_AIRCD_FUNC: dict[HVACMode, int] = {
     HVACMode.HEAT: AIRCD_FUNC_HEAT,
     HVACMode.DRY: AIRCD_FUNC_DRY,
     HVACMode.FAN_ONLY: AIRCD_FUNC_FAN,
-}
-_HVAC_MODE_TO_ACTION: dict[HVACMode, HVACAction] = {
-    HVACMode.COOL: HVACAction.COOLING,
-    HVACMode.HEAT: HVACAction.HEATING,
-    HVACMode.DRY: HVACAction.DRYING,
-    HVACMode.FAN_ONLY: HVACAction.FAN,
 }
 
 
@@ -367,17 +360,24 @@ class VivosunAeroLushClimateEntity(CoordinatorEntity[VivosunCoordinator], Climat
 
     @property
     def hvac_action(self) -> HVACAction | None:
-        """Return the actual HVAC action, respecting device pause state."""
+        """Return only an AeroLush action that the device state can verify."""
         mode = self.hvac_mode
         if mode == HVACMode.OFF:
             return HVACAction.OFF
         if mode is None:
-            return HVACAction.IDLE
+            return None
+
         aircd = self._aircd_state()
         pause = aircd.get("pause")
         if isinstance(pause, int) and pause == 1:
             return HVACAction.IDLE
-        return _HVAC_MODE_TO_ACTION.get(mode, HVACAction.IDLE)
+
+        # `state` and `func` describe the configured C08 mode, not whether the
+        # compressor/fan is actually running. The C08 can remain state=1,
+        # func=DRY, pause=0 while the physical Dry operation has stopped.
+        # Until a device-confirmed runtime field is identified, returning a
+        # mode-derived action here would falsely report DRYING/COOLING/HEATING.
+        return None
 
     @property
     def target_temperature(self) -> float | None:
@@ -444,7 +444,7 @@ class VivosunAeroLushClimateEntity(CoordinatorEntity[VivosunCoordinator], Climat
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:
-        """Return raw AeroLush state values for diagnostics."""
+        """Return AeroLush state and raw reported data for diagnostics."""
         aircd = self._aircd_state()
         attrs: dict[str, object] = {}
         for attr_name, state_key in (
@@ -459,6 +459,23 @@ class VivosunAeroLushClimateEntity(CoordinatorEntity[VivosunCoordinator], Climat
             value = aircd.get(state_key)
             if value is not None:
                 attrs[attr_name] = value
+
+        mode = self.hvac_mode
+        pause = aircd.get("pause")
+        if mode == HVACMode.OFF:
+            attrs["activity_status"] = "off"
+        elif isinstance(pause, int) and pause == 1:
+            attrs["activity_status"] = "idle"
+        else:
+            attrs["activity_status"] = "unverified"
+
+        reported_supported = shadow_slice(
+            self.coordinator, self._device_id, "reported_supported"
+        )
+        raw_aircd = reported_supported.get("aircd")
+        if isinstance(raw_aircd, Mapping):
+            attrs["raw_aircd"] = dict(raw_aircd)
+
         return attrs
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
