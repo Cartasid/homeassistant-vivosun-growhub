@@ -15,6 +15,7 @@ from .const import (
     DOMAIN,
     OPTION_SUPPORT_CAPTURE_ENABLED,
     PLATFORMS,
+    SERVICE_CLEAR_AEROLUSH_DESIRED,
     SERVICE_SET_AEROLUSH_AIRCD,
     SERVICE_START_SUPPORT_CAPTURE,
     SERVICE_STOP_SUPPORT_CAPTURE,
@@ -59,6 +60,9 @@ def _register_services(hass: HomeAssistant) -> None:
     async def _handle_set_aerolush_aircd(call: ServiceCall) -> None:
         await _async_handle_set_aerolush_aircd(hass, call)
 
+    async def _handle_clear_aerolush_desired(call: ServiceCall) -> None:
+        await _async_handle_clear_aerolush_desired(hass, call)
+
     if not hass.services.has_service(DOMAIN, SERVICE_START_SUPPORT_CAPTURE):
         hass.services.async_register(
             DOMAIN,
@@ -97,6 +101,18 @@ def _register_services(hass: HomeAssistant) -> None:
                 }
             ),
         )
+    if not hass.services.has_service(DOMAIN, SERVICE_CLEAR_AEROLUSH_DESIRED):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_CLEAR_AEROLUSH_DESIRED,
+            _handle_clear_aerolush_desired,
+            schema=vol.Schema(
+                {
+                    vol.Optional("entry_id"): str,
+                    vol.Optional("device_id"): str,
+                }
+            ),
+        )
 
 
 def _resolve_runtime_for_service(hass: HomeAssistant, entry_id: str | None) -> RuntimeData:
@@ -112,6 +128,22 @@ def _resolve_runtime_for_service(hass: HomeAssistant, entry_id: str | None) -> R
     if len(runtimes) != 1:
         raise ServiceValidationError("entry_id is required when multiple Vivosun entries are configured")
     return runtimes[0]
+
+
+def _resolve_aerolush_device_id(coordinator: VivosunCoordinator, device_id: str | None) -> str:
+    """Resolve a single AeroLush device for a service call."""
+    if device_id is not None:
+        device = coordinator.get_device(device_id)
+        if device is None or device.device_type != "air_conditioner":
+            raise ServiceValidationError(f"Unknown AeroLush device_id: {device_id}")
+        return device_id
+
+    air_conditioners = [d for d in coordinator.devices if d.device_type == "air_conditioner"]
+    if len(air_conditioners) != 1:
+        raise ServiceValidationError(
+            "device_id is required when zero or multiple AeroLush devices are present"
+        )
+    return air_conditioners[0].device_id
 
 
 async def _async_handle_start_support_capture(hass: HomeAssistant, call: ServiceCall) -> None:
@@ -151,19 +183,28 @@ async def _async_handle_set_aerolush_aircd(hass: HomeAssistant, call: ServiceCal
             "At least one of state, func, tTemp, tHumi or wdLv is required"
         )
 
-    device_id = cast("str | None", call.data.get("device_id"))
-    if device_id is None:
-        air_conditioners = [d for d in coordinator.devices if d.device_type == "air_conditioner"]
-        if len(air_conditioners) != 1:
-            raise ServiceValidationError(
-                "device_id is required when zero or multiple AeroLush devices are present"
-            )
-        device_id = air_conditioners[0].device_id
+    device_id = _resolve_aerolush_device_id(
+        coordinator, cast("str | None", call.data.get("device_id"))
+    )
 
     try:
         payload = build_aircd_payload(fields)
     except ValueError as err:
         raise ServiceValidationError(str(err)) from err
+    await coordinator.async_publish_shadow_update(payload, device_id=device_id)
+
+
+async def _async_handle_clear_aerolush_desired(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Clear persistent desired.aircd without changing the reported device state."""
+    runtime = _resolve_runtime_for_service(hass, cast("str | None", call.data.get("entry_id")))
+    coordinator = runtime.coordinator
+    if coordinator is None:
+        raise ServiceValidationError("Vivosun coordinator is not loaded")
+
+    device_id = _resolve_aerolush_device_id(
+        coordinator, cast("str | None", call.data.get("device_id"))
+    )
+    payload: dict[str, object] = {"state": {"desired": {"aircd": None}}}
     await coordinator.async_publish_shadow_update(payload, device_id=device_id)
 
 
@@ -215,5 +256,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove(DOMAIN, SERVICE_START_SUPPORT_CAPTURE)
         hass.services.async_remove(DOMAIN, SERVICE_STOP_SUPPORT_CAPTURE)
         hass.services.async_remove(DOMAIN, SERVICE_SET_AEROLUSH_AIRCD)
+        hass.services.async_remove(DOMAIN, SERVICE_CLEAR_AEROLUSH_DESIRED)
         hass.data.pop(DOMAIN, None)
     return True
