@@ -30,6 +30,7 @@ OPTION_SUPPORT_CAPTURE_ENABLED = "support_capture_enabled"
 SERVICE_START_SUPPORT_CAPTURE = "start_support_capture"
 SERVICE_STOP_SUPPORT_CAPTURE = "stop_support_capture"
 SERVICE_SET_AEROLUSH_AIRCD = "set_aerolush_aircd"
+SERVICE_CLEAR_AEROLUSH_DESIRED = "clear_aerolush_desired"
 SUPPORT_CAPTURE_DEFAULT_MAX_EVENTS = 500
 
 SHADOW_NAME = "GrowHub"
