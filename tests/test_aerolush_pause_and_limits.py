@@ -66,6 +66,59 @@ def test_aerolush_pause_reports_idle_while_mode_remains_dry() -> None:
     assert entity.hvac_mode == HVACMode.DRY
     assert entity.hvac_action == HVACAction.IDLE
     assert entity.extra_state_attributes["pause"] == 1
+    assert entity.extra_state_attributes["activity_status"] == "idle"
+
+
+def test_aerolush_dry_action_is_unverified_without_runtime_signal() -> None:
+    coordinator = _CoordinatorStub()
+    raw_aircd = {
+        "state": 1,
+        "func": 3,
+        "pause": 0,
+        "wdLv": 100,
+        "tHumi": 4000,
+        "unknownRuntimeField": 7,
+    }
+    coordinator.data = {
+        "shadows": {
+            _DEVICE_ID: {
+                "aircd": {
+                    "state": 1,
+                    "function": 3,
+                    "pause": 0,
+                    "fan_level": 100,
+                    "target_humidity": 4000,
+                },
+                "reported_supported": {"aircd": raw_aircd},
+            }
+        }
+    }
+    entity = _entity(coordinator)
+
+    assert entity.hvac_mode == HVACMode.DRY
+    assert entity.hvac_action is None
+    assert entity.extra_state_attributes["activity_status"] == "unverified"
+    assert entity.extra_state_attributes["raw_aircd"] == raw_aircd
+
+
+def test_aerolush_off_action_remains_off() -> None:
+    coordinator = _CoordinatorStub()
+    coordinator.data = {
+        "shadows": {
+            _DEVICE_ID: {
+                "aircd": {
+                    "state": 0,
+                    "function": 3,
+                    "pause": 0,
+                }
+            }
+        }
+    }
+    entity = _entity(coordinator)
+
+    assert entity.hvac_mode == HVACMode.OFF
+    assert entity.hvac_action == HVACAction.OFF
+    assert entity.extra_state_attributes["activity_status"] == "off"
 
 
 def test_aerolush_humidity_minimum_is_40_percent() -> None:
