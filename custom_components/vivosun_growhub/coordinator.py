@@ -464,25 +464,29 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
         self._support_capture.stop()
 
     def _support_capture_topic_names(self) -> list[str]:
-        """Return device-scoped recon subscriptions used only during support capture."""
-        topics: list[str] = []
+        """Return safe device-scoped recon subscriptions used during support capture.
+
+        The main MQTT client already records the normal shadow get/update/documents/delta
+        topics. The dedicated probe therefore only needs the device-prefix wildcard and
+        standard shadow rejection topics. Named-shadow wildcard filters are deliberately
+        excluded because some VIVOSUN/AWS policies close the probe connection when those
+        filters are requested, which would otherwise disable the useful prefix capture.
+        """
+        prefix_topics: list[str] = []
+        rejection_topics: list[str] = []
         for device in self._devices:
+            if device.topic_prefix:
+                prefix_topics.append(f"{device.topic_prefix}/#")
             if device.client_id:
-                topics.extend(
+                rejection_topics.extend(
                     [
                         f"$aws/things/{device.client_id}/shadow/get/rejected",
                         f"$aws/things/{device.client_id}/shadow/update/rejected",
-                        f"$aws/things/{device.client_id}/shadow/name/+/get/accepted",
-                        f"$aws/things/{device.client_id}/shadow/name/+/get/rejected",
-                        f"$aws/things/{device.client_id}/shadow/name/+/update/accepted",
-                        f"$aws/things/{device.client_id}/shadow/name/+/update/rejected",
-                        f"$aws/things/{device.client_id}/shadow/name/+/update/documents",
-                        f"$aws/things/{device.client_id}/shadow/name/+/update/delta",
                     ]
                 )
-            if device.topic_prefix:
-                topics.append(f"{device.topic_prefix}/#")
-        return sorted(set(topics))
+        # Preserve priority: capture broad VIVOSUN device traffic before optional
+        # rejection diagnostics. Deduplicate without alphabetically reordering.
+        return list(dict.fromkeys([*prefix_topics, *rejection_topics]))
 
     def _record_support_capture_subscription_deferred(self) -> None:
         """Record that extra support subscriptions will be retried after reconnect."""
@@ -514,7 +518,12 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
                     )
                     continue
 
-                for deferred_topic in topics[index:]:
+                self._support_capture.record_subscription_result(
+                    topic,
+                    status="connection_closed",
+                    reason="mqtt_disconnected",
+                )
+                for deferred_topic in topics[index + 1 :]:
                     self._support_capture.record_subscription_result(
                         deferred_topic,
                         status="deferred",
