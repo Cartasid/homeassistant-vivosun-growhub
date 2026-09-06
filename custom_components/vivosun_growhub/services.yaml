@@ -100,12 +100,12 @@ set_aerolush_aircd:
           step: 1
     tHumi:
       name: Target Humidity (raw)
-      description: Target humidity scaled by 100 (for example 5500 = 55.00 %).
+      description: Target humidity scaled by 100. AeroLush C08 minimum is 4000 = 40.00 %.
       required: false
-      example: 5500
+      example: 4000
       selector:
         number:
-          min: 0
+          min: 4000
           max: 10000
           step: 1
     wdLv:

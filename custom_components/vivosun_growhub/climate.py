@@ -58,6 +58,8 @@ _EXPLICIT_TURN_FEATURES = _TURN_ON_FEATURE | _TURN_OFF_FEATURE
 
 _AIRCD_FAN_QUIET = "quiet"
 _AIRCD_FAN_STANDARD = "standard"
+_AIRCD_MIN_HUMIDITY = 40
+_AIRCD_MAX_HUMIDITY = 100
 _AIRCD_FUNC_TO_HVAC_MODE: dict[int, HVACMode] = {
     AIRCD_FUNC_COOL: HVACMode.COOL,
     AIRCD_FUNC_HEAT: HVACMode.HEAT,
@@ -301,8 +303,8 @@ class VivosunAeroLushClimateEntity(CoordinatorEntity[VivosunCoordinator], Climat
     _attr_min_temp = 10
     _attr_max_temp = 40
     _attr_target_temperature_step = 0.1
-    _attr_min_humidity = 0
-    _attr_max_humidity = 100
+    _attr_min_humidity = _AIRCD_MIN_HUMIDITY
+    _attr_max_humidity = _AIRCD_MAX_HUMIDITY
     _attr_target_humidity_step = 1
     _enable_turn_on_off_backwards_compatibility = ClimateEntityFeature(0) == _EXPLICIT_TURN_FEATURES
 
@@ -353,7 +355,7 @@ class VivosunAeroLushClimateEntity(CoordinatorEntity[VivosunCoordinator], Climat
 
     @property
     def hvac_mode(self) -> HVACMode | None:
-        """Return the current HVAC mode."""
+        """Return the configured HVAC mode."""
         aircd = self._aircd_state()
         state = aircd.get("state")
         if not (isinstance(state, int) and state == 1):
@@ -365,11 +367,15 @@ class VivosunAeroLushClimateEntity(CoordinatorEntity[VivosunCoordinator], Climat
 
     @property
     def hvac_action(self) -> HVACAction | None:
-        """Return the current HVAC action."""
+        """Return the actual HVAC action, respecting device pause state."""
         mode = self.hvac_mode
         if mode == HVACMode.OFF:
             return HVACAction.OFF
         if mode is None:
+            return HVACAction.IDLE
+        aircd = self._aircd_state()
+        pause = aircd.get("pause")
+        if isinstance(pause, int) and pause == 1:
             return HVACAction.IDLE
         return _HVAC_MODE_TO_ACTION.get(mode, HVACAction.IDLE)
 
@@ -498,7 +504,8 @@ class VivosunAeroLushClimateEntity(CoordinatorEntity[VivosunCoordinator], Climat
         )
 
     async def async_set_humidity(self, humidity: int) -> None:
-        """Set the target humidity."""
+        """Set the target humidity within the AeroLush-supported range."""
+        humidity = max(_AIRCD_MIN_HUMIDITY, min(_AIRCD_MAX_HUMIDITY, humidity))
         target_raw = humidity * 100
         await self.coordinator.async_publish_shadow_update(
             build_aircd_target_humidity_payload(target_raw), device_id=self._device_id
