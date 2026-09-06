@@ -92,7 +92,7 @@ def _register_services(hass: HomeAssistant) -> None:
                     vol.Optional("state"): vol.All(vol.Coerce(int), vol.Range(min=0, max=1)),
                     vol.Optional("func"): vol.All(vol.Coerce(int), vol.Range(min=1, max=4)),
                     vol.Optional("tTemp"): vol.All(vol.Coerce(int), vol.Range(min=1000, max=4000)),
-                    vol.Optional("tHumi"): vol.All(vol.Coerce(int), vol.Range(min=0, max=10000)),
+                    vol.Optional("tHumi"): vol.All(vol.Coerce(int), vol.Range(min=4000, max=10000)),
                     vol.Optional("wdLv"): vol.All(vol.Coerce(int), vol.In((50, 100))),
                 }
             ),
@@ -202,7 +202,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a Vivosun GrowHub config entry."""
+    """Unload Vivosun GrowHub from a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if not unload_ok:
         return False
